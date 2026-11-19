@@ -1,17 +1,8 @@
-import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteLoaderData } from "react-router";
+import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 import type { Route } from "./+types/root";
 import "./app.css";
-import { servicosContext } from "./contexto.server";
-import { formatarBp } from "@/domain/dinheiro";
 import { Cabecalho } from "./componentes/Cabecalho";
 import { Rodape } from "./componentes/Rodape";
-import { FaixaDemo } from "./componentes/FaixaDemo";
-
-export async function loader({ context }: Route.LoaderArgs) {
-  const { config, modoDemo } = context.get(servicosContext);
-  const cfg = await config();
-  return { taxaTexto: formatarBp(cfg.taxaBp), modoDemo };
-}
 
 export const links: Route.LinksFunction = () => [{ rel: "icon", href: "/favicon.ico" }];
 
@@ -35,15 +26,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const dados = useRouteLoaderData<typeof loader>("root");
   return (
     <>
-      {dados?.modoDemo && <FaixaDemo />}
       <Cabecalho />
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
         <Outlet />
       </main>
-      <Rodape taxaTexto={dados?.taxaTexto ?? "10%"} />
+      <Rodape />
     </>
   );
 }

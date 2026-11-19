@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { criarContextoTeste, requisicao, type ContextoTeste } from "~/teste/contexto";
-import { loader } from "./root";
 import { semIndexacao } from "~/util/robots";
 
 let t: ContextoTeste;
@@ -14,9 +13,8 @@ afterAll(async () => {
 });
 
 describe("root", () => {
-  test("loader avisa se o site está em modo demonstração", async () => {
-    const dados = await loader({ request: requisicao("/"), params: {}, context: t.contexto() } as never);
-    expect(dados.modoDemo).toBe(false);
+  test("a raiz não tem loader: nada de configuração ou flag de demonstração vai para o navegador", async () => {
+    expect(await import("./root")).not.toHaveProperty("loader");
   });
 
   test("em demo, toda resposta sai com X-Robots-Tag noindex, preservando status e corpo", async () => {
