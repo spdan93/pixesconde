@@ -1,0 +1,15 @@
+# Tudo dentro de .claude/ fica fora do git: ali vivem a instalacao do kit
+# (catalogo e tasteskill, ~45 MB de leitura), o settings.json com o wiring dos
+# hooks, e os arquivos de estado do delete guard (.delete-approval,
+# .delete-watermark, .delete-unresolved, .delete-carried,
+# .pending-deletions.jsonl). Ignorar so os arquivos de estado e a pegadinha:
+# parece suficiente e deixa os 45 MB entrarem no commit.
+.claude/
+
+# OS / editor
+.DS_Store
+**/.DS_Store
+
+# brainstorm visual companion
+.superpowers/
+.taste-skill/
