@@ -1,6 +1,7 @@
 import { createRequestHandler, RouterContextProvider } from "react-router";
 import { cloudflareContext, servicosContext } from "~/contexto.server";
 import { montarServicos, rodarCron } from "~/servicos.server";
+import { semIndexacao } from "~/util/robots";
 
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
@@ -14,7 +15,9 @@ export default {
     context.set(cloudflareContext, { env, ctx });
     context.set(servicosContext, servicos);
     try {
-      return await requestHandler(request, context);
+      const resposta = await requestHandler(request, context);
+      // Demonstração não aparece em busca: quem chegasse por lá acharia que o Pix é de verdade.
+      return servicos.modoDemo ? semIndexacao(resposta) : resposta;
     } finally {
       ctx.waitUntil(servicos.fechar());
     }

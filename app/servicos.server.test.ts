@@ -29,6 +29,24 @@ describe("I7: produção falha fechado com provedores de mentira", () => {
   });
 });
 
+describe("modo demonstração", () => {
+  const https = { ...ENV_TESTE, URL_PUBLICA: "https://pix-esconde.exemplo.workers.dev" };
+
+  test("MODO_DEMO=1 libera provedores de mentira em https e marca o grafo como demo", () => {
+    const s = montarServicos({ ...https, MODO_DEMO: "1" }, { db, fechar: async () => {}, silencioso: true });
+    expect(s.modoDemo).toBe(true);
+  });
+
+  test("qualquer outro valor de MODO_DEMO mantém a trava", () => {
+    expect(() => montarServicos({ ...https, MODO_DEMO: "true" }, { db, fechar: async () => {}, silencioso: true })).toThrow(/produção/);
+    expect(() => montarServicos({ ...https, MODO_DEMO: "" }, { db, fechar: async () => {}, silencioso: true })).toThrow(/produção/);
+  });
+
+  test("sem MODO_DEMO o grafo não é demo", () => {
+    expect(montarServicos(ENV_TESTE, { db, fechar: async () => {}, silencioso: true }).modoDemo).toBe(false);
+  });
+});
+
 describe("I2: cron agrupa créditos confirmados também em modo imediato", () => {
   test("doação confirmada sem repasse ganha repasse na próxima rodada do cron, em qualquer gatilho", async () => {
     const s = montarServicos(ENV_TESTE, { db, fechar: async () => {}, silencioso: true });

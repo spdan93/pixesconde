@@ -21,6 +21,8 @@ export type Servicos = {
   segredos: Segredos;
   urlPublica: string;
   emProducao: boolean;
+  /** Demonstração pública: provedores de mentira em https, com faixa avisando em toda tela. */
+  modoDemo: boolean;
   fechar(): Promise<void>;
 };
 
@@ -31,6 +33,8 @@ export type EnvServicos = {
   PROVEDOR_EMAIL?: string;
   PROVEDOR_CAPTCHA?: string;
   URL_PUBLICA: string;
+  /** "1" libera os provedores de mentira em https, para mostrar o site sem dinheiro de verdade. */
+  MODO_DEMO?: string;
   CHAVE_CIFRA: string;
   SEGREDO_HMAC: string;
   SEGREDO_COOKIE: string;
@@ -63,9 +67,12 @@ export function montarServicos(env: EnvServicos, opts: OpcoesServicos = {}): Ser
   };
   const urlPublica = exigir(env, "URL_PUBLICA").replace(/\/$/, "");
   const emProducao = urlPublica.startsWith("https://");
+  // Só o valor exato "1" liga a demonstração: um typo na variável não abre a trava.
+  const modoDemo = env.MODO_DEMO === "1";
   // Produção falha fechado: nenhum provedor de mentira pode confirmar pagamento, pular o
-  // anti-robô ou mandar e-mail para o log quando a URL pública é https.
-  if (emProducao) {
+  // anti-robô ou mandar e-mail para o log quando a URL pública é https, a menos que o
+  // site esteja declaradamente em demonstração.
+  if (emProducao && !modoDemo) {
     const deMentira = [
       ["PROVEDOR_PAGAMENTO", env.PROVEDOR_PAGAMENTO, "fake"],
       ["PROVEDOR_REPASSE", env.PROVEDOR_REPASSE, "fake"],
@@ -101,6 +108,7 @@ export function montarServicos(env: EnvServicos, opts: OpcoesServicos = {}): Ser
     segredos,
     urlPublica,
     emProducao,
+    modoDemo,
     fechar: conexao.fechar,
   };
 }
