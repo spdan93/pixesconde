@@ -1,7 +1,8 @@
-import { Form } from "react-router";
+import { data, Form } from "react-router";
 import type { Route } from "./+types/comprovante";
 import { servicosContext } from "~/contexto.server";
 import { formatarBp, formatarReais } from "@/domain/dinheiro";
+import { mensagemRecusaVinculo, VALIDADE_TOKEN_MIN } from "@/domain/apelidos/servico";
 import { lerCookie, nomeCookieDoador } from "~/util/cookies";
 import { dataHora, nomeAnonimo, numeroComprovante } from "~/util/formatos";
 import { Botao } from "~/componentes/Botao";
@@ -41,6 +42,21 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     ehODoador,
     urlPublica: s.urlPublica,
   };
+}
+
+export async function action({ params, request, context }: Route.ActionArgs) {
+  const s = context.get(servicosContext);
+  const form = await request.formData();
+  if (form.get("intent") !== "vincular") return data({ vinculo: { ok: false, mensagem: "ação desconhecida" } }, { status: 400 });
+  const segredo = lerCookie(request, nomeCookieDoador(params.id));
+  if (!(await s.apelidos.ehODoador(params.id, segredo))) {
+    return data({ vinculo: { ok: false, mensagem: mensagemRecusaVinculo("nao_e_o_doador") } }, { status: 403 });
+  }
+  const r = await s.apelidos.solicitarVinculo({ doacaoId: params.id, email: String(form.get("email") ?? ""), segredoDoador: segredo });
+  if (!r.ok) return data({ vinculo: { ok: false, mensagem: mensagemRecusaVinculo(r.motivo) } }, { status: 400 });
+  return data({
+    vinculo: { ok: true, mensagem: `Mandamos um link para o seu e-mail. Vale ${VALIDADE_TOKEN_MIN} minutos. Clica nele e pronto.` },
+  });
 }
 
 export default function Comprovante({ loaderData: d, actionData }: Route.ComponentProps) {
@@ -134,7 +150,12 @@ export default function Comprovante({ loaderData: d, actionData }: Route.Compone
           </>
         )}
 
-        {confirmada && d.ehODoador && c.apelidoTexto && (
+        {confirmada && d.ehODoador && c.apelidoTexto && c.apelidoConfirmado && (
+          <p className="mt-8 max-w-md border-2 border-tinta p-4 text-[14px]">
+            Esse Pix conta no ranking como <b>{c.apelidoTexto}</b>. Apelido confirmado.
+          </p>
+        )}
+        {confirmada && d.ehODoador && c.apelidoTexto && !c.apelidoConfirmado && (
           <section aria-labelledby="vincular" className="mt-8 max-w-md border-2 border-tinta p-5">
             <h3 id="vincular" className="font-bold">
               Quer que esse Pix conte no ranking como {c.apelidoTexto}?

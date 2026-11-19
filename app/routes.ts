@@ -9,6 +9,8 @@ export default [
   route("k/:token", "routes/k.tsx"),
   route("mandar/:numero", "routes/mandar.tsx"),
   route("comprovante/:id", "routes/comprovante.tsx"),
+  route("ranking", "routes/ranking.tsx"),
+  route("apelido/confirmar/:token", "routes/apelido.confirmar.tsx"),
   route("dev/pagar/:ref", "routes/dev.pagar.tsx"),
   route("webhooks/fake", "routes/webhooks.fake.ts"),
 ] satisfies RouteConfig;

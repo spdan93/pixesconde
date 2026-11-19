@@ -36,6 +36,8 @@ export type Comprovante = {
   numeroPublico: number;
   recebedorId: string;
   apelidoTexto: string | null;
+  /** O apelido desta doação já está vinculado a um dono confirmado. */
+  apelidoConfirmado: boolean;
   mensagem: string | null;
   mensagemOculta: boolean;
   criadaEm: Date;
@@ -284,10 +286,12 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
           doacao: doacoes,
           numeroPublico: recebedoresNumero.numeroPublico,
           repasseStatus: repasses.status,
+          apelidoConfirmadoEm: apelidos.confirmadoEm,
         })
         .from(doacoes)
         .innerJoin(recebedoresNumero, eq(recebedoresNumero.id, doacoes.recebedorId))
         .leftJoin(repasses, eq(repasses.id, doacoes.repasseId))
+        .leftJoin(apelidos, eq(apelidos.id, doacoes.apelidoId))
         .where(eq(doacoes.id, id))
         .limit(1);
       if (!linha) return null;
@@ -307,6 +311,7 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
         numeroPublico: linha.numeroPublico,
         recebedorId: d.recebedorId,
         apelidoTexto: d.apelidoTexto,
+        apelidoConfirmado: Boolean(d.apelidoId && linha.apelidoConfirmadoEm),
         mensagem: d.mensagem,
         mensagemOculta: d.mensagemOculta,
         criadaEm: d.criadaEm,
