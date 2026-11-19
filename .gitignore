@@ -13,3 +13,23 @@
 # brainstorm visual companion
 .superpowers/
 .taste-skill/
+
+# node / build
+/node_modules/
+*.tsbuildinfo
+/.react-router/
+/build/
+.env
+!.env.example
+
+# Cloudflare
+.mf
+.wrangler
+.dev.vars*
+!.dev.vars.example
+worker-configuration.d.ts
+
+# testes
+/test-results/
+/playwright-report/
+/.playwright-mcp/

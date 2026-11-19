@@ -1,0 +1,37 @@
+/**
+ * Configuração do Worker. Referência:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "pix-esconde",
+	"compatibility_date": "2026-11-17",
+	"compatibility_flags": ["nodejs_compat"],
+	"main": "./workers/app.ts",
+	"assets": {
+		"directory": "./public/",
+		"binding": "ASSETS"
+	},
+	"vars": {
+		"PROVEDOR_PAGAMENTO": "fake",
+		"PROVEDOR_REPASSE": "fake",
+		"URL_PUBLICA": "http://localhost:5173"
+	},
+	// Em dev, a string de conexão local vem de
+	// CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE (ver .dev.vars.example)
+	// ou do localConnectionString abaixo. O id só importa em produção.
+	"hyperdrive": [
+		{
+			"binding": "HYPERDRIVE",
+			"id": "00000000000000000000000000000000",
+			"localConnectionString": "postgres://postgres@localhost:5433/pix_esconde"
+		}
+	],
+	"triggers": {
+		"crons": ["*/15 * * * *"]
+	},
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true
+}
