@@ -3,6 +3,7 @@ import { data, Form, Link, redirect } from "react-router";
 import type { Route } from "./+types/k";
 import { servicosContext } from "~/contexto.server";
 import { mensagemRecusa } from "@/domain/chaves/validar-chave";
+import { ipDaRequisicao, permitir } from "@/infra/limites";
 import { MENSAGEM_DUPLICADA } from "./cadastrar";
 import { dataHora, formatarReais, nomeAnonimo, tempoRelativo } from "~/util/formatos";
 import { Botao } from "~/componentes/Botao";
@@ -57,14 +58,21 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const intent = String(form.get("intent") ?? "");
   if (!INTENTS.has(intent)) return data({ erroTroca: null as string | null, erro: "ação desconhecida" }, { status: 400 });
 
+  // Transições permitidas, conferidas no servidor: o estado atual decide o que pode.
+  const recusar = (msg: string, status = 400) => data({ erroTroca: null as string | null, erro: msg }, { status });
+
   switch (intent) {
     case "pausar":
+      if (recebedor.status !== "ativa" && recebedor.status !== "aguardando_validacao") return recusar("só dá para pausar quem está na roda");
       await s.recebedores.pausar(recebedor.id);
       break;
     case "reativar":
+      // 'invalida' só volta pela troca de chave; 'removida' não volta.
+      if (recebedor.status !== "pausada") return recusar("só dá para voltar quem está pausado");
       await s.recebedores.reativar(recebedor.id);
       break;
     case "remover":
+      if (recebedor.status === "removida") return recusar("já está fora da roda");
       await s.recebedores.remover(recebedor.id);
       break;
     case "denunciar": {
@@ -74,6 +82,14 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       break;
     }
     case "trocar": {
+      if (recebedor.status === "removida") return recusar("fora da roda não troca chave");
+      const ip = ipDaRequisicao(request);
+      const dentroDoLimite =
+        (await permitir(s.db, `trocar:ip:${ip}`, 24 * 60, 10)) && (await permitir(s.db, `trocar:rec:${recebedor.id}`, 24 * 60, 5));
+      if (!dentroDoLimite) return data({ erroTroca: "Muitas trocas hoje. Volta amanhã.", erro: null }, { status: 429 });
+      if (!(await s.provedores.captcha.verificar(form.get("cf-turnstile-response") as string | null, ip))) {
+        return data({ erroTroca: "Não conseguimos confirmar que você não é um robô. Recarrega e tenta de novo.", erro: null }, { status: 400 });
+      }
       const r = await s.recebedores.trocarChave(recebedor.id, String(form.get("chave") ?? ""));
       if (!r.ok) {
         return data({ erroTroca: r.motivo === "duplicada" ? MENSAGEM_DUPLICADA : mensagemRecusa(r.motivo), erro: null }, { status: 400 });

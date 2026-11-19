@@ -1,19 +1,24 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull } from "drizzle-orm";
 import type { Db } from "@/infra/db/client";
 import { apelidos, denuncias, doacoes, tokensMagicos } from "@/infra/db/schema";
 import type { Provedores } from "@/providers";
 import { assinarCookie, cifrar, gerarToken, hmacHex, sha256Hex, verificarCookie } from "@/infra/crypto";
+import { permitir } from "@/infra/limites";
 
 export const VALIDADE_TOKEN_MIN = 30;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const PREFIXO_COOKIE = "apelido:";
 
-export type ResultadoVinculo =
-  | { ok: true }
-  | {
-      ok: false;
-      motivo: "nao_e_o_doador" | "sem_apelido" | "apelido_de_outro" | "email_invalido" | "email_ja_tem_apelido" | "doacao_nao_confirmada";
-    };
+export type MotivoVinculo =
+  | "nao_e_o_doador"
+  | "sem_apelido"
+  | "apelido_de_outro"
+  | "email_invalido"
+  | "email_ja_tem_apelido"
+  | "doacao_nao_confirmada"
+  | "muitas_tentativas";
+
+export type ResultadoVinculo = { ok: true } | { ok: false; motivo: MotivoVinculo };
 
 export type ResultadoConfirmacao = { ok: true; apelidoId: string; nome: string; cookie: string } | { ok: false };
 
@@ -34,7 +39,7 @@ export type DepsApelidos = {
   agora?: () => Date;
 };
 
-export function mensagemRecusaVinculo(motivo: Exclude<ResultadoVinculo, { ok: true }>["motivo"]): string {
+export function mensagemRecusaVinculo(motivo: MotivoVinculo): string {
   switch (motivo) {
     case "nao_e_o_doador":
       return "Só quem mandou esse Pix, no mesmo navegador, pode vincular o apelido.";
@@ -48,6 +53,8 @@ export function mensagemRecusaVinculo(motivo: Exclude<ResultadoVinculo, { ok: tr
       return "Isso não parece um e-mail.";
     case "email_ja_tem_apelido":
       return "Esse e-mail já é dono de outro apelido. Um e-mail, um apelido.";
+    case "muitas_tentativas":
+      return "Muitos pedidos em pouco tempo. Olha o e-mail que já mandamos, ou tenta daqui a uma hora.";
   }
 }
 
@@ -60,6 +67,21 @@ export function criarServicoApelidos(deps: DepsApelidos): ServicoApelidos {
     const [d] = await db.select({ hash: doacoes.segredoDoadorHash }).from(doacoes).where(eq(doacoes.id, doacaoId)).limit(1);
     if (!d?.hash) return false;
     return (await sha256Hex(segredoDoador)) === d.hash;
+  }
+
+  /** Conflitos só contra apelidos CONFIRMADOS: pedido pendente não reserva nada. */
+  async function conflito(nome: string, emailHash: string): Promise<MotivoVinculo | null> {
+    const [porNome] = await db.select().from(apelidos).where(and(eq(apelidos.nome, nome), isNotNull(apelidos.confirmadoEm))).limit(1);
+    if (porNome && porNome.emailHash !== emailHash) return "apelido_de_outro";
+    if (!porNome) {
+      const [porEmail] = await db
+        .select({ id: apelidos.id })
+        .from(apelidos)
+        .where(and(eq(apelidos.emailHash, emailHash), isNotNull(apelidos.confirmadoEm)))
+        .limit(1);
+      if (porEmail) return "email_ja_tem_apelido";
+    }
+    return null;
   }
 
   return {
@@ -75,20 +97,26 @@ export function criarServicoApelidos(deps: DepsApelidos): ServicoApelidos {
 
       const emailHash = await hmacHex(email, segredos.segredoHmac);
       const nome = doacao.apelidoTexto;
-      let [apelido] = await db.select().from(apelidos).where(eq(apelidos.nome, nome)).limit(1);
-      if (apelido && apelido.emailHash !== emailHash) return { ok: false, motivo: "apelido_de_outro" };
-      if (!apelido) {
-        const [mesmoEmail] = await db.select({ id: apelidos.id }).from(apelidos).where(eq(apelidos.emailHash, emailHash)).limit(1);
-        if (mesmoEmail) return { ok: false, motivo: "email_ja_tem_apelido" };
-        [apelido] = await db
-          .insert(apelidos)
-          .values({ nome, emailHash, emailCifrado: await cifrar(email, segredos.chaveCifra), criadoEm: agora() })
-          .returning();
-      }
+      const motivo = await conflito(nome, emailHash);
+      if (motivo) return { ok: false, motivo };
+
+      // Limites: por doação e por e-mail, para ninguém usar o site como canhão de e-mail.
+      const dentro =
+        (await permitir(db, `vinculo:doa:${doacaoId}`, 60, 3, agora())) && (await permitir(db, `vinculo:email:${emailHash}`, 60, 5, agora()));
+      if (!dentro) return { ok: false, motivo: "muitas_tentativas" };
+
+      const [donoConfirmado] = await db
+        .select({ id: apelidos.id })
+        .from(apelidos)
+        .where(and(eq(apelidos.nome, nome), eq(apelidos.emailHash, emailHash), isNotNull(apelidos.confirmadoEm)))
+        .limit(1);
 
       const token = gerarToken();
       await db.insert(tokensMagicos).values({
-        apelidoId: apelido!.id,
+        apelidoId: donoConfirmado?.id ?? null,
+        nome,
+        emailHash,
+        emailCifrado: await cifrar(email, segredos.chaveCifra),
         doacaoId,
         tokenHash: await sha256Hex(token),
         expiraEm: new Date(agora().getTime() + VALIDADE_TOKEN_MIN * 60_000),
@@ -119,11 +147,29 @@ export function criarServicoApelidos(deps: DepsApelidos): ServicoApelidos {
         .returning({ id: tokensMagicos.id });
       if (usado.length === 0) return { ok: false };
 
-      const [apelido] = await db.select().from(apelidos).where(eq(apelidos.id, t.apelidoId)).limit(1);
-      if (!apelido) return { ok: false };
-      if (!apelido.confirmadoEm) {
+      // A disputa se resolve aqui: quem confirma primeiro leva; o segundo com outro e-mail falha.
+      if (await conflito(t.nome, t.emailHash)) return { ok: false };
+
+      let [apelido] = await db
+        .select()
+        .from(apelidos)
+        .where(and(eq(apelidos.nome, t.nome), eq(apelidos.emailHash, t.emailHash)))
+        .limit(1);
+      if (!apelido) {
+        try {
+          [apelido] = await db
+            .insert(apelidos)
+            .values({ nome: t.nome, emailHash: t.emailHash, emailCifrado: t.emailCifrado, confirmadoEm: agora(), criadoEm: agora() })
+            .returning();
+        } catch {
+          // corrida com outra confirmação do mesmo nome ou e-mail: perdeu
+          return { ok: false };
+        }
+      } else if (!apelido.confirmadoEm) {
         await db.update(apelidos).set({ confirmadoEm: agora() }).where(eq(apelidos.id, apelido.id));
       }
+      if (!apelido) return { ok: false };
+
       if (t.doacaoId) {
         await db
           .update(doacoes)

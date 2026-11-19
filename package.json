@@ -18,12 +18,14 @@
 		"e2e": "playwright test"
 	},
 	"dependencies": {
+		"@resvg/resvg-wasm": "^2.6.2",
 		"drizzle-orm": "^0.45.4",
 		"isbot": "^5.1.36",
 		"postgres": "^4.1.1",
 		"react": "^19.3.1",
 		"react-dom": "^19.3.1",
 		"react-router": "^8.5.1",
+		"satori": "^0.63.2",
 		"zod": "^4.6.7"
 	},
 	"devDependencies": {

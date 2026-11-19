@@ -10,11 +10,17 @@ export const apelidos = pgTable("apelidos", {
   criadoEm: timestamp("criado_em", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Reivindicação de apelido pendente. O apelido só nasce (ou é vinculado) quando o
+ * token é confirmado: pedir não reserva nada, e quem confirma primeiro leva.
+ */
 export const tokensMagicos = pgTable("tokens_magicos", {
   id: uuid("id").primaryKey().defaultRandom(),
-  apelidoId: uuid("apelido_id")
-    .notNull()
-    .references(() => apelidos.id),
+  /** Preenchido quando a reivindicação é de um apelido já confirmado (dono em outro aparelho). */
+  apelidoId: uuid("apelido_id").references(() => apelidos.id),
+  nome: text("nome").notNull(),
+  emailHash: text("email_hash").notNull(),
+  emailCifrado: text("email_cifrado").notNull(),
   doacaoId: uuid("doacao_id"),
   tokenHash: text("token_hash").notNull().unique(),
   expiraEm: timestamp("expira_em", { withTimezone: true }).notNull(),

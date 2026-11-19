@@ -9,6 +9,7 @@ export default [
   route("k/:token", "routes/k.tsx"),
   route("mandar/:numero", "routes/mandar.tsx"),
   route("comprovante/:id", "routes/comprovante.tsx"),
+  route("comprovante/:id/imagem.png", "routes/comprovante.imagem.ts"),
   route("ranking", "routes/ranking.tsx"),
   route("apelido/confirmar/:token", "routes/apelido.confirmar.tsx"),
   route("dev/pagar/:ref", "routes/dev.pagar.tsx"),

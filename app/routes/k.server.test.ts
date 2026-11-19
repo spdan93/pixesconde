@@ -103,3 +103,38 @@ describe("página secreta", () => {
     expect(r.init.status).toBe(400);
   });
 });
+
+describe("transições e limites", () => {
+  let tk: string;
+  beforeAll(async () => {
+    const r = await t.servicos.recebedores.cadastrar("abababab-04b1-4d8a-9f27-c21e5a6b0d93");
+    if (!r.ok) throw new Error("setup");
+    tk = r.token;
+  });
+
+  test("pausar duas vezes: a segunda é recusada; reativar só sai de pausada", async () => {
+    expect(((await agir({ intent: "pausar" }, tk)) as Response).status).toBe(302);
+    const denovo = (await agir({ intent: "pausar" }, tk)) as { init: { status: number } };
+    expect(denovo.init.status).toBe(400);
+    expect(((await agir({ intent: "reativar" }, tk)) as Response).status).toBe(302);
+    const semPausa = (await agir({ intent: "reativar" }, tk)) as { init: { status: number } };
+    expect(semPausa.init.status).toBe(400);
+  });
+
+  test("recebedor inválido não volta para a roda por reativar", async () => {
+    const d = await carregar(tk);
+    await t.servicos.recebedores.marcarInvalida(d.recebedor.id);
+    const r = (await agir({ intent: "reativar" }, tk)) as { init: { status: number } };
+    expect(r.init.status).toBe(400);
+    expect((await carregar(tk)).recebedor.status).toBe("invalida");
+  });
+
+  test("trocar chave tem limite por recebedor", async () => {
+    for (let i = 0; i < 5; i++) {
+      const r = (await agir({ intent: "trocar", chave: `${(i + 1).toString(16).padStart(8, "d")}-04b1-4d8a-9f27-c21e5a6b0d93` }, tk)) as Response;
+      expect(r.status).toBe(302);
+    }
+    const r = (await agir({ intent: "trocar", chave: "eeeeeeee-04b1-4d8a-9f27-c21e5a6b0d93" }, tk)) as { init: { status: number } };
+    expect(r.init.status).toBe(429);
+  });
+});

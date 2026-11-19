@@ -36,6 +36,13 @@
       "when": 1795055377983,
       "tag": "0004_graceful_ricochet",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795056233408,
+      "tag": "0005_curvy_sabretooth",
+      "breakpoints": true
     }
   ]
 }

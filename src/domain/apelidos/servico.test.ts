@@ -63,6 +63,7 @@ describe("vínculo por link mágico", () => {
   let doacaoId: string;
   let apelidoId: string;
   let cookie: string;
+  let tokenConcorrente: string;
 
   test("doação sem apelido não tem o que vincular", async () => {
     const semApelido = await doar("");
@@ -74,13 +75,19 @@ describe("vínculo por link mágico", () => {
     expect(await servico.solicitarVinculo({ doacaoId, email: "nao é email", segredoDoador: segredos.get(doacaoId)! })).toEqual({ ok: false, motivo: "email_invalido" });
   });
 
-  test("solicitar envia e-mail com link e cria apelido não confirmado", async () => {
+  test("solicitar envia e-mail com link e NÃO cria apelido antes da confirmação", async () => {
     expect(await servico.solicitarVinculo({ doacaoId, email: "Pastel@Exemplo.com ", segredoDoador: segredos.get(doacaoId)! })).toEqual({ ok: true });
     expect(email.enviados.at(-1)!.para).toBe("pastel@exemplo.com");
     expect(email.enviados.at(-1)!.texto).toContain("http://x/apelido/confirmar/");
-    const [a] = await db.select().from(apelidos).where(eq(apelidos.nome, "pastel_de_vento"));
-    expect(a!.confirmadoEm).toBeNull();
-    expect(a!.emailCifrado.startsWith("enc:v1:")).toBe(true);
+    expect(await db.select().from(apelidos).where(eq(apelidos.nome, "pastel_de_vento"))).toHaveLength(0);
+  });
+
+  test("outro doador pode pedir o mesmo apelido enquanto ninguém confirmou (sem reserva por pedido)", async () => {
+    const outra = await doar("pastel_de_vento");
+    expect(await servico.solicitarVinculo({ doacaoId: outra, email: "concorrente@exemplo.com", segredoDoador: segredos.get(outra)! })).toEqual({ ok: true });
+    tokenConcorrente = tokenDoUltimoEmail();
+    // volta a pedir para a doação original, para o token dela ser o último e-mail
+    expect(await servico.solicitarVinculo({ doacaoId, email: "pastel@exemplo.com", segredoDoador: segredos.get(doacaoId)! })).toEqual({ ok: true });
   });
 
   test("token confirma uma vez: apelido confirmado, doação vinculada, cookie devolvido", async () => {
@@ -92,9 +99,15 @@ describe("vínculo por link mágico", () => {
     cookie = r.cookie;
     const [a] = await db.select().from(apelidos).where(eq(apelidos.id, apelidoId));
     expect(a!.confirmadoEm).not.toBeNull();
+    expect(a!.emailCifrado.startsWith("enc:v1:")).toBe(true);
     const [d] = await db.select().from(doacoes).where(eq(doacoes.id, doacaoId));
     expect(d!.apelidoId).toBe(apelidoId);
     expect(await servico.confirmarToken(token)).toEqual({ ok: false });
+  });
+
+  test("quem confirma depois, com outro e-mail, perde o apelido", async () => {
+    expect(await servico.confirmarToken(tokenConcorrente)).toEqual({ ok: false });
+    expect(await db.select().from(apelidos).where(eq(apelidos.nome, "pastel_de_vento"))).toHaveLength(1);
   });
 
   test("cookie resolve o id; adulterado resolve null", async () => {
@@ -160,5 +173,15 @@ describe("prova de que é o doador", () => {
     expect(await servico.solicitarVinculo({ doacaoId: r.doacaoId, email: "x@y.com", segredoDoador: r.segredoDoador })).toEqual({ ok: true });
     expect(await servico.ehODoador(r.doacaoId, r.segredoDoador)).toBe(true);
     expect(await servico.ehODoador(r.doacaoId, "errado")).toBe(false);
+  });
+});
+
+describe("limite de pedidos de vínculo", () => {
+  test("a 4ª solicitação na hora para a mesma doação é recusada", async () => {
+    const d = await doar("limitado");
+    for (let i = 0; i < 3; i++) {
+      expect(await servico.solicitarVinculo({ doacaoId: d, email: `l${i}@exemplo.com`, segredoDoador: segredos.get(d)! })).toEqual({ ok: true });
+    }
+    expect(await servico.solicitarVinculo({ doacaoId: d, email: "l9@exemplo.com", segredoDoador: segredos.get(d)! })).toEqual({ ok: false, motivo: "muitas_tentativas" });
   });
 });
