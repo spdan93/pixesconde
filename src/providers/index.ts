@@ -27,7 +27,7 @@ export function criarProvedores(env: EnvProvedores, opts: { silencioso?: boolean
 function escolherEmail(env: EnvProvedores, silencioso?: boolean) {
   switch (env.PROVEDOR_EMAIL ?? "console") {
     case "console":
-      return new ConsoleEmail(silencioso);
+      return new ConsoleEmail(silencioso, env.URL_PUBLICA.startsWith("https://"));
     case "resend":
       throw new Error("PROVEDOR_EMAIL=resend: não implementado nesta fase (ver spec, seção 9)");
     default:

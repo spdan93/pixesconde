@@ -5,6 +5,8 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "pix-esconde",
+	// Conta da Cloudflare só do pix esconde: nenhum deploy cai em outra conta por engano.
+	"account_id": "3468c2fcd7863809843ee9e94ee6c926",
 	"compatibility_date": "2026-11-17",
 	"compatibility_flags": ["nodejs_compat"],
 	"main": "./workers/app.ts",
@@ -12,20 +14,22 @@
 		"directory": "./public/",
 		"binding": "ASSETS"
 	},
+	// Valores da demonstração no ar. No dev local, o .dev.vars sobrescreve URL_PUBLICA com localhost.
 	"vars": {
+		"MODO_DEMO": "1",
 		"PROVEDOR_PAGAMENTO": "fake",
 		"PROVEDOR_REPASSE": "fake",
 		"PROVEDOR_EMAIL": "console",
 		"PROVEDOR_CAPTCHA": "sempre-ok",
-		"URL_PUBLICA": "http://localhost:5173"
+		"URL_PUBLICA": "https://pix-esconde.pix-esconde.workers.dev"
 	},
 	// Em dev, a string de conexão local vem de
 	// CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE (ver .dev.vars.example)
-	// ou do localConnectionString abaixo. O id só importa em produção.
+	// ou do localConnectionString abaixo. O id é o Hyperdrive pix-esconde-db, ligado ao Supabase.
 	"hyperdrive": [
 		{
 			"binding": "HYPERDRIVE",
-			"id": "00000000000000000000000000000000",
+			"id": "cd23bbff01c946c78198f2cf52d0c257",
 			"localConnectionString": "postgres://postgres:postgres@localhost:5433/pix_esconde"
 		}
 	],

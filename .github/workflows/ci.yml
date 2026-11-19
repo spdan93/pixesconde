@@ -1,0 +1,45 @@
+# Roda em todo PR (para develop ou main) e em todo push na develop.
+# "Pronto" aqui é o mesmo do .claude/verify.sh: typecheck, testes e build.
+name: ci
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `wrangler types` tira os nomes dos segredos do .dev.vars; o example tem os nomes, sem valor.
+      - run: cp .dev.vars.example .dev.vars
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  # A main só recebe o que passou pela develop.
+  origem-develop:
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR para main precisa vir da develop
+        env:
+          ORIGEM: ${{ github.head_ref }}
+        run: |
+          if [ "$ORIGEM" != "develop" ]; then
+            echo "::error::PR para main só pode vir da develop (veio de '$ORIGEM')."
+            exit 1
+          fi
