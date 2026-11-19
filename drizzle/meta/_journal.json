@@ -8,6 +8,13 @@
       "when": 1795053856152,
       "tag": "0000_jazzy_mindworm",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795054023826,
+      "tag": "0001_rls_todas_tabelas",
+      "breakpoints": true
     }
   ]
 }

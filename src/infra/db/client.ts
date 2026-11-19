@@ -1,10 +1,13 @@
-import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import type { PgliteDatabase } from "drizzle-orm/pglite";
+import { drizzle } from "drizzle-orm/postgres-js";
+import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import postgres from "postgres";
 import * as schema from "./schema";
 
-/** Mesma API para Postgres real (produção/dev) e PGlite (testes). */
-export type Db = PostgresJsDatabase<typeof schema> | PgliteDatabase<typeof schema>;
+/**
+ * Tipo comum ao Postgres real (postgres.js, produção/dev), ao PGlite (testes)
+ * e às transações de ambos: todo serviço recebe um `Db` e nunca sabe qual é.
+ */
+export type Db = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 /**
  * Conexão via postgres.js. `prepare: false` porque o pooler do Supabase em modo

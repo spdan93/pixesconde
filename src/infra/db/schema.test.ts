@@ -43,6 +43,18 @@ describe("esquema", () => {
     }
   });
 
+  test("toda tabela tem RLS ativo, sem políticas (bloqueia a Data API do Supabase)", async () => {
+    const tabelas = await executarLinhas<{ relname: string; relrowsecurity: boolean }>(
+      db,
+      sql`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public' and c.relkind = 'r' and c.relname <> '__drizzle_migrations'`,
+    );
+    expect(tabelas.length).toBeGreaterThan(5);
+    for (const t of tabelas) expect(t.relrowsecurity, t.relname).toBe(true);
+    const politicas = await executarLinhas<{ n: number }>(db, sql`select count(*)::int as n from pg_policies`);
+    expect(politicas[0]!.n).toBe(0);
+  });
+
   test("numero_publico é sequencial", async () => {
     const [a] = await db.insert(recebedores).values({ tokenHash: "a" }).returning();
     const [b] = await db.insert(recebedores).values({ tokenHash: "b" }).returning();
