@@ -1,0 +1,52 @@
+# Deploy quando um PR aprovado é mesclado na main: migra o banco e sobe o Worker.
+#
+# Segredos do ambiente "production" (Settings > Environments > production):
+#   CLOUDFLARE_API_TOKEN   token com o modelo "Edit Cloudflare Workers", restrito à conta do pix esconde
+#   CLOUDFLARE_ACCOUNT_ID  id dessa conta
+#   DATABASE_URL           Supabase pelo pooler de sessão (IPv4; a conexão direta só fala IPv6,
+#                          e os runners do GitHub não têm IPv6)
+# Os segredos do Worker (CHAVE_CIFRA, SEGREDO_HMAC, SEGREDO_COOKIE) vivem na Cloudflare,
+# gravados uma vez com `wrangler secret put`, e não passam por aqui.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-producao
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.8.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      # Migração antes do código: as migrações são aditivas, então o Worker antigo
+      # continua funcionando sobre o schema novo durante os segundos do deploy.
+      - name: Migrar banco
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm db:migrate
+
+      - run: pnpm build
+      - name: Subir Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
