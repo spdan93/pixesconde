@@ -28,7 +28,19 @@ export class FakeEntrada implements ProvedorEntrada {
     });
   }
 
+  private excecaoConsulta: Error | null = null;
+
+  /** Simula o provedor fora do ar no meio do processamento de um webhook. */
+  lancarNaProximaConsulta(erro: Error) {
+    this.excecaoConsulta = erro;
+  }
+
   async consultar(i: Parameters<ProvedorEntrada["consultar"]>[0]) {
+    if (this.excecaoConsulta) {
+      const e = this.excecaoConsulta;
+      this.excecaoConsulta = null;
+      throw e;
+    }
     const c = this.cobrancas.get(i.refExterna);
     if (!c) return { status: "desconhecido" as const, valorCentavos: null, idProvedor: null };
     return { status: c.status, valorCentavos: c.valorCentavos, idProvedor: c.idProvedor };

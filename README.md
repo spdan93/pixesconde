@@ -101,3 +101,9 @@ há mais de 30 dias e concilia estornos ambíguos.
    `pnpm db:migrate` com `DATABASE_URL` de produção, `wrangler secret put` para `CHAVE_CIFRA`, `SEGREDO_HMAC`,
    `SEGREDO_COOKIE`; `URL_PUBLICA` com https.
 4. Conta Mercado Pago PJ, conversa com contador sobre o fluxo de passagem, nome e domínio definitivos.
+5. **Medir o tempo de CPU de `/comprovante/:id/imagem.png` num Worker real.** satori + resvg em WASM podem passar
+   do limite do plano gratuito; se passarem, gerar a imagem no webhook (`ctx.waitUntil`) e guardar em R2 ou no
+   Cache API, servindo os bytes prontos.
+
+Produção falha fechado: com `URL_PUBLICA` em https, qualquer `PROVEDOR_*` de mentira (`fake`, `console`,
+`sempre-ok`) impede o Worker de subir.

@@ -33,10 +33,15 @@ test("cadastrar chave → mandar Pix → pagar (fake) → comprovante → págin
   await expect(page.getByRole("article", { name: "comprovante" })).toContainText("robo_e2e");
   // só o doador (cookie) vê a caixa de vincular apelido
   await expect(page.getByRole("heading", { name: /conte no ranking como robo_e2e/ })).toBeVisible();
-  // imagem para compartilhar responde PNG
+  // imagem para compartilhar responde PNG, e o botão baixa de verdade (fora do roteador)
   const imagem = await page.request.get(`${page.url()}/imagem.png`);
   expect(imagem.status()).toBe(200);
   expect(imagem.headers()["content-type"]).toContain("image/png");
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: "Baixar imagem do comprovante" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^pix-sem-motivo-PE-\d{6}\.png$/);
 
   // 5. Página secreta de quem recebe
   await page.goto(linkSecreto);

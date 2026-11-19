@@ -10,8 +10,17 @@ type Base = {
 
 type Props = Base &
   (
-    | { href: string; type?: never; disabled?: never; name?: never; value?: never; onClick?: never }
-    | ({ href?: undefined } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className" | "children">)
+    | {
+        href: string;
+        /** Arquivo para baixar: vira `<a download>` servido pelo navegador, fora do roteador. */
+        baixar?: string;
+        type?: never;
+        disabled?: never;
+        name?: never;
+        value?: never;
+        onClick?: never;
+      }
+    | ({ href?: undefined; baixar?: never } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className" | "children">)
   );
 
 const base =
@@ -30,13 +39,20 @@ export function Botao(props: Props) {
   const { variante, tamanho = "m", children, className = "" } = props;
   const classes = `${base} ${variantes[variante]} ${tamanhos[tamanho]} ${className}`;
   if (props.href !== undefined) {
+    if (props.baixar !== undefined) {
+      return (
+        <a href={props.href} download={props.baixar} className={classes}>
+          {children}
+        </a>
+      );
+    }
     return (
       <Link to={props.href} className={classes}>
         {children}
       </Link>
     );
   }
-  const { href: _h, variante: _v, tamanho: _t, children: _c, className: _cn, ...resto } = props;
+  const { href: _h, baixar: _b, variante: _v, tamanho: _t, children: _c, className: _cn, ...resto } = props;
   return (
     <button type="button" {...resto} className={classes}>
       {children}

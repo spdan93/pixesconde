@@ -26,6 +26,8 @@ export interface ServicoApelidos {
   /** O segredo do doador é entregue só ao navegador que criou a doação (cookie). Sem ele, ninguém vincula. */
   solicitarVinculo(i: { doacaoId: string; email: string; segredoDoador: string | null }): Promise<ResultadoVinculo>;
   ehODoador(doacaoId: string, segredoDoador: string | null): Promise<boolean>;
+  /** Só olha: o token é válido e para qual apelido? Não consome (o GET do e-mail passa por aqui). */
+  espiarToken(token: string): Promise<{ nome: string } | null>;
   confirmarToken(token: string): Promise<ResultadoConfirmacao>;
   apelidoIdDoCookie(valorCookie: string | null): Promise<string | null>;
   denunciar(doacaoId: string, motivo: string | null): Promise<void>;
@@ -125,6 +127,16 @@ export function criarServicoApelidos(deps: DepsApelidos): ServicoApelidos {
         html: `<p>Alguém (você, esperamos) quer que um Pix sem motivo conte no ranking como <strong>${nome}</strong>.</p><p><a href="${url}">Confirmar apelido</a> (vale por ${VALIDADE_TOKEN_MIN} minutos)</p><p>Se não foi você, ignore. Nada acontece.</p>`,
       });
       return { ok: true };
+    },
+
+    async espiarToken(token) {
+      const tokenHash = await sha256Hex(token);
+      const [t] = await db
+        .select({ nome: tokensMagicos.nome })
+        .from(tokensMagicos)
+        .where(and(eq(tokensMagicos.tokenHash, tokenHash), isNull(tokensMagicos.usadoEm), gt(tokensMagicos.expiraEm, agora())))
+        .limit(1);
+      return t ? { nome: t.nome } : null;
     },
 
     async confirmarToken(token) {

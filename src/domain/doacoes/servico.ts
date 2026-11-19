@@ -108,11 +108,20 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
     return a.id;
   }
 
+  /**
+   * Registra a notificação. Evento já PROCESSADO → null (ignorar). Evento registrado mas sem
+   * `processado_em` (o processamento anterior morreu no meio) → devolve o id de novo: o reenvio
+   * do provedor é exatamente a chance de terminar o serviço.
+   */
   async function registrarEvento(i: { provedor: string; idExterno: string; payload: unknown }): Promise<string | null> {
     const linhas = await db
       .insert(eventosWebhook)
-      .values({ provedor: i.provedor, idExterno: i.idExterno, payload: (i.payload ?? {}) as object })
-      .onConflictDoNothing()
+      .values({ provedor: i.provedor, idExterno: i.idExterno, payload: (i.payload ?? {}) as object, recebidoEm: agora() })
+      .onConflictDoUpdate({
+        target: [eventosWebhook.provedor, eventosWebhook.idExterno],
+        set: { recebidoEm: agora() },
+        setWhere: isNull(eventosWebhook.processadoEm),
+      })
       .returning({ id: eventosWebhook.id });
     return linhas[0]?.id ?? null;
   }
@@ -216,7 +225,9 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
         await concluirEvento(eventoId, "desconhecida");
         return { resultado: "desconhecida", efeitosPendentes: false };
       }
-      if (doacao.status !== "pendente") {
+      // 'expirada' também confirma: o relógio expirou a intenção, mas o dinheiro entrou.
+      // Ignorar seria deixar saldo real sem lançamento no razão e um doador sem comprovante.
+      if (doacao.status !== "pendente" && doacao.status !== "expirada") {
         await concluirEvento(eventoId, "ja_processada");
         return { resultado: "ja_processada", efeitosPendentes: false };
       }
@@ -244,7 +255,7 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
             confirmadaEm: agora(),
             provedorPagamentoId: consulta.idProvedor ?? i.idProvedor ?? doacao.provedorPagamentoId,
           })
-          .where(and(eq(doacoes.id, doacao.id), eq(doacoes.status, "pendente")))
+          .where(and(eq(doacoes.id, doacao.id), inArray(doacoes.status, ["pendente", "expirada"])))
           .returning({ id: doacoes.id });
         if (atualizadas.length === 0) return false;
         await lancar(tx, { tipo: "entrada", valorCentavos: doacao.valorCentavos, doacaoId: doacao.id });
@@ -332,6 +343,12 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
       if (!linha || linha.doacao.status !== "confirmada") return false;
       if (linha.repasseStatus !== null && linha.repasseStatus !== "falhou") return false;
       const d = linha.doacao;
+      // Sem id no provedor não existe reembolso possível: lançar reversão seria inventar dinheiro
+      // que voltou. Fica para conciliação manual (scripts/razao.ts).
+      if (!d.provedorPagamentoId) {
+        console.error(`[doacoes] estorno impossível em ${doacaoId}: sem id do provedor (${motivo})`);
+        return false;
+      }
 
       // 1) Reserva: 'estornando' tira a doação do alcance do agrupamento de repasses.
       //    Condicional ao estado lido, para fechar a janela entre a leitura e a reserva.
@@ -351,19 +368,17 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
       // 2) Reembolso no provedor. Falha definitiva (ok: false): volta a 'confirmada'.
       //    Exceção (timeout, rede) é ambígua: fica 'estornando', fora do alcance do repasse,
       //    e conciliarEstornos decide depois perguntando ao provedor.
-      if (d.provedorPagamentoId) {
-        let reembolso: { ok: boolean; erro?: string };
-        try {
-          reembolso = await provedores.entrada.reembolsar({ idProvedor: d.provedorPagamentoId, valorCentavos: d.valorCentavos });
-        } catch (erro) {
-          console.error(`[doacoes] reembolso indeterminado em ${doacaoId}:`, erro);
-          return false;
-        }
-        if (!reembolso.ok) {
-          console.error(`[doacoes] reembolso falhou em ${doacaoId}: ${reembolso.erro ?? "sem detalhe"}`);
-          await reverterEstorno(doacaoId);
-          return false;
-        }
+      let reembolso: { ok: boolean; erro?: string };
+      try {
+        reembolso = await provedores.entrada.reembolsar({ idProvedor: d.provedorPagamentoId, valorCentavos: d.valorCentavos });
+      } catch (erro) {
+        console.error(`[doacoes] reembolso indeterminado em ${doacaoId}:`, erro);
+        return false;
+      }
+      if (!reembolso.ok) {
+        console.error(`[doacoes] reembolso falhou em ${doacaoId}: ${reembolso.erro ?? "sem detalhe"}`);
+        await reverterEstorno(doacaoId);
+        return false;
       }
 
       // 3) Fecha: estornada + reversões no razão.
@@ -404,7 +419,8 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
       let revertidas = 0;
       for (const d of presas) {
         if (!d.provedorPagamentoId) {
-          if (await fecharEstorno(d)) estornadas++;
+          // não há o que conciliar sem id: volta a confirmada e fica para a operação
+          if (await reverterEstorno(d.id)) revertidas++;
           continue;
         }
         const { status } = await provedores.entrada.consultarReembolso({ idProvedor: d.provedorPagamentoId });

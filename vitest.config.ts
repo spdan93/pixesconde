@@ -12,6 +12,9 @@ export default defineConfig({
   },
   test: {
     passWithNoTests: true,
+    // PGlite sobe um Postgres em WASM por arquivo; com a máquina ocupada (e2e rodando ao lado) os 10 s padrão estouram.
+    hookTimeout: 30_000,
+    testTimeout: 20_000,
     projects: [
       {
         extends: true,

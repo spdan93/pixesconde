@@ -305,3 +305,55 @@ describe("reembolso ambíguo", () => {
     expect(await saldo(db)).toBe(antes - 1800);
   });
 });
+
+describe("revisão final: webhook em todas as ordens", () => {
+  async function pendente(valorTexto = "5") {
+    const r = await servico.criarIntencao({ ...base, valorTexto, mensagem: "", apelido: "" });
+    if (!r.ok) throw new Error("setup");
+    return r.doacaoId;
+  }
+  const notificar = (ref: string, idExterno: string) =>
+    servico.processarNotificacao({ provedor: "fake", idExterno, refExterna: ref, idProvedor: null, payload: {} });
+
+  test("C1: falha no meio do processamento não engole o reenvio com o mesmo id", async () => {
+    const id = await pendente();
+    const ref = `doa_${id}`;
+    entrada.marcarResultado(ref, "aprovado");
+    entrada.lancarNaProximaConsulta(new Error("timeout do provedor"));
+    await expect(notificar(ref, "evt_falha_1")).rejects.toThrow(/timeout/);
+    // o MP reenvia a MESMA notificação
+    const r = await notificar(ref, "evt_falha_1");
+    expect(r.resultado).toBe("confirmada");
+    expect(await db.select().from(lancamentos).where(eq(lancamentos.doacaoId, id))).toHaveLength(2);
+  });
+
+  test("C2: aprovado que chega depois de expirar ainda confirma (o dinheiro entrou)", async () => {
+    const id = await pendente("20");
+    const ref = `doa_${id}`;
+    relogio = new Date(relogio.getTime() + 31 * 60_000);
+    await servico.expirarIntencoes();
+    let [d] = await db.select().from(doacoes).where(eq(doacoes.id, id));
+    expect(d!.status).toBe("expirada");
+    entrada.marcarResultado(ref, "aprovado");
+    const antes = await saldo(db);
+    const r = await notificar(ref, "evt_tardio");
+    expect(r.resultado).toBe("confirmada");
+    [d] = await db.select().from(doacoes).where(eq(doacoes.id, id));
+    expect(d!.status).toBe("confirmada");
+    expect(await saldo(db)).toBe(antes + 1800);
+    expect(await db.select().from(lancamentos).where(eq(lancamentos.doacaoId, id))).toHaveLength(2);
+  });
+
+  test("I6: sem id do provedor não há como reembolsar, então não estorna", async () => {
+    const id = await pendente("5");
+    const ref = `doa_${id}`;
+    entrada.marcarResultado(ref, "aprovado");
+    await notificar(ref, "evt_sem_id");
+    await db.update(doacoes).set({ provedorPagamentoId: null }).where(eq(doacoes.id, id));
+    const antes = await saldo(db);
+    expect(await servico.estornar(id, "teste")).toBe(false);
+    const [d] = await db.select().from(doacoes).where(eq(doacoes.id, id));
+    expect(d!.status).toBe("confirmada");
+    expect(await saldo(db)).toBe(antes);
+  });
+});

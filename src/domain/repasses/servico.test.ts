@@ -266,3 +266,23 @@ describe("compare-and-swap na transição", () => {
     expect(await saldo(db)).toBe(antes); // e nada foi lançado por A
   });
 });
+
+describe("revisão final", () => {
+  test("I3: três repasses falhos seguidos marcam o recebedor como inválido (entra na devolução)", async () => {
+    const n = await cadastrar("teimosa", "ffffffff-1111-4d8a-9f27-c21e5a6b0d93");
+    await doar(n, "5");
+    await servico.processarAgendados(); // escoa
+    for (let rodada = 1; rodada <= 3; rodada++) {
+      const repasseId = await servico.agendarParaRecebedor(ids.teimosa!);
+      expect(repasseId).toBeTruthy();
+      for (let t = 0; t <= 5; t++) {
+        relogio = new Date(relogio.getTime() + 2 ** (t + 1) * 60_000 + 1);
+        await servico.processarAgendados();
+      }
+      const [rep] = await db.select().from(repasses).where(eq(repasses.id, repasseId!));
+      expect(rep!.status).toBe("falhou");
+      const status = (await recebedores.buscarPublico(n))!.status;
+      expect(status).toBe(rodada < 3 ? "aguardando_validacao" : "invalida");
+    }
+  });
+});

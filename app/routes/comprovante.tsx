@@ -112,7 +112,7 @@ export default function Comprovante({ loaderData: d, actionData }: Route.Compone
               Esse comprovante é público e não tem nada que identifique você nem quem recebeu. Compartilhe à vontade.
             </p>
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-              <Botao variante="primario" href={`/comprovante/${c.id}/imagem.png`}>
+              <Botao variante="primario" href={`/comprovante/${c.id}/imagem.png`} baixar={`pix-sem-motivo-${numeroComprovante(c.numeroComprovante)}.png`}>
                 Baixar imagem do comprovante
               </Botao>
               <Botao variante="contorno" href="/sortear">

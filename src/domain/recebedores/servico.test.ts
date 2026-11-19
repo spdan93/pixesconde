@@ -157,3 +157,18 @@ describe("troca de chave", () => {
     expect((await servico.obterChaveDecifrada(id))?.chave).toBe(UUID_D);
   });
 });
+
+describe("revisão final", () => {
+  test("I4: trocar a chave de um recebedor pausado não o recoloca na roda", async () => {
+    const r = await servico.cadastrar("12121212-04b1-4d8a-9f27-c21e5a6b0d93");
+    if (!r.ok) throw new Error("setup");
+    const priv = await servico.buscarPorToken(r.token);
+    await servico.pausar(priv!.id);
+    expect((await servico.trocarChave(priv!.id, "13131313-04b1-4d8a-9f27-c21e5a6b0d93")).ok).toBe(true);
+    expect((await servico.buscarPorToken(r.token))!.status).toBe("pausada");
+    // inválido volta a aguardar validação
+    await servico.marcarInvalida(priv!.id);
+    await servico.trocarChave(priv!.id, "14141414-04b1-4d8a-9f27-c21e5a6b0d93");
+    expect((await servico.buscarPorToken(r.token))!.status).toBe("aguardando_validacao");
+  });
+});

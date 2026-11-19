@@ -28,6 +28,8 @@ export type EnvServicos = {
   HYPERDRIVE: { connectionString: string };
   PROVEDOR_PAGAMENTO: string;
   PROVEDOR_REPASSE: string;
+  PROVEDOR_EMAIL?: string;
+  PROVEDOR_CAPTCHA?: string;
   URL_PUBLICA: string;
   CHAVE_CIFRA: string;
   SEGREDO_HMAC: string;
@@ -60,6 +62,20 @@ export function montarServicos(env: EnvServicos, opts: OpcoesServicos = {}): Ser
     segredoCookie: exigir(env, "SEGREDO_COOKIE"),
   };
   const urlPublica = exigir(env, "URL_PUBLICA").replace(/\/$/, "");
+  const emProducao = urlPublica.startsWith("https://");
+  // Produção falha fechado: nenhum provedor de mentira pode confirmar pagamento, pular o
+  // anti-robô ou mandar e-mail para o log quando a URL pública é https.
+  if (emProducao) {
+    const deMentira = [
+      ["PROVEDOR_PAGAMENTO", env.PROVEDOR_PAGAMENTO, "fake"],
+      ["PROVEDOR_REPASSE", env.PROVEDOR_REPASSE, "fake"],
+      ["PROVEDOR_EMAIL", env.PROVEDOR_EMAIL ?? "console", "console"],
+      ["PROVEDOR_CAPTCHA", env.PROVEDOR_CAPTCHA ?? "sempre-ok", "sempre-ok"],
+    ].filter(([, valor, falso]) => valor === falso);
+    if (deMentira.length > 0) {
+      throw new Error(`produção (URL_PUBLICA https) com provedor de mentira: ${deMentira.map(([nome, valor]) => `${nome}=${valor}`).join(", ")}`);
+    }
+  }
   const provedores = opts.provedores ?? criarProvedores(env, { silencioso: opts.silencioso });
 
   // Config lida uma vez por requisição.
@@ -84,7 +100,7 @@ export function montarServicos(env: EnvServicos, opts: OpcoesServicos = {}): Ser
     ranking,
     segredos,
     urlPublica,
-    emProducao: urlPublica.startsWith("https://"),
+    emProducao,
     fechar: conexao.fechar,
   };
 }
@@ -93,15 +109,15 @@ export function montarServicos(env: EnvServicos, opts: OpcoesServicos = {}): Ser
 export const HORA_REPASSE_DIARIO_UTC = 13;
 
 /** Rotina do Cron Trigger (a cada 15 min). */
-export async function rodarCron(env: EnvServicos, agora = new Date()): Promise<Record<string, number>> {
-  const s = montarServicos(env);
+export async function rodarCron(env: EnvServicos, agora = new Date(), opts: OpcoesServicos = {}): Promise<Record<string, number>> {
+  const s = montarServicos(env, { ...opts, agora: opts.agora ?? (() => agora) });
   try {
     const cfg = await s.config();
     const expiradas = await s.doacoes.expirarIntencoes();
-    let agendados = 0;
-    if (cfg.gatilhoRepasse === "diario" && agora.getUTCHours() === HORA_REPASSE_DIARIO_UTC && agora.getUTCMinutes() < 15) {
-      agendados = await s.repasses.agendarTodos();
-    }
+    // Diário: agrupa no horário. Imediato: agrupa toda rodada mesmo assim — é idempotente e é a
+    // rede de segurança para o efeito pós-confirmação que falhou no webhook.
+    const horaDoLote = agora.getUTCHours() === HORA_REPASSE_DIARIO_UTC && agora.getUTCMinutes() < 15;
+    const agendados = cfg.gatilhoRepasse === "imediato" || horaDoLote ? await s.repasses.agendarTodos() : 0;
     const { concluidos, falhos } = await s.repasses.processarAgendados();
     const devolvidas = await s.repasses.devolverRetidos(30);
     const estornos = await s.doacoes.conciliarEstornos();

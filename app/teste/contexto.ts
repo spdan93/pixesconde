@@ -7,6 +7,8 @@ export const ENV_TESTE = {
   HYPERDRIVE: { connectionString: "postgres://nao-usado" },
   PROVEDOR_PAGAMENTO: "fake",
   PROVEDOR_REPASSE: "fake",
+  PROVEDOR_EMAIL: "console",
+  PROVEDOR_CAPTCHA: "sempre-ok",
   URL_PUBLICA: "http://localhost:5173",
   CHAVE_CIFRA: "wJ1m3n9Qq2v5x8z1A4c7E0g3I6k9M2o5R8t1V4w7Y0a=",
   SEGREDO_HMAC: "Zz1m3n9Qq2v5x8z1A4c7E0g3I6k9M2o5R8t1V4w7Y0b=",

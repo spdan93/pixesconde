@@ -3,7 +3,7 @@ import { criarContextoTeste, formulario, requisicao, type ContextoTeste } from "
 import type { FakeEntrada } from "@/providers/payment-in/fake";
 import type { ConsoleEmail } from "@/providers/email/console";
 import { loader as rankingLoader } from "./ranking";
-import { loader as confirmarLoader } from "./apelido.confirmar";
+import { action as confirmarAction, loader as confirmarLoader } from "./apelido.confirmar";
 import { action as comprovanteAction, loader as comprovanteLoader } from "./comprovante";
 import { action as mandarAction } from "./mandar";
 
@@ -69,9 +69,17 @@ describe("vincular apelido pelo comprovante", () => {
 });
 
 describe("confirmar apelido", () => {
-  test("token válido confirma, grava o cookie de dono e manda para o ranking", async () => {
+  test("I5: o GET só mostra a página; quem confirma é o POST (scanner de e-mail não queima o token)", async () => {
     const token = tokenDoUltimoEmail();
-    const r = (await confirmarLoader({ request: requisicao(`/apelido/confirmar/${token}`), params: { token }, context: t.contexto() } as never)) as Response;
+    const d = await confirmarLoader({ request: requisicao(`/apelido/confirmar/${token}`), params: { token }, context: t.contexto() } as never);
+    expect(d).toEqual({ nome: "pastel_de_vento", valido: true });
+    const d2 = await confirmarLoader({ request: requisicao(`/apelido/confirmar/${token}`), params: { token }, context: t.contexto() } as never);
+    expect(d2).toEqual({ nome: "pastel_de_vento", valido: true }); // ainda não consumido
+  });
+
+  test("token válido confirma pelo POST, grava o cookie de dono e manda para o ranking", async () => {
+    const token = tokenDoUltimoEmail();
+    const r = (await confirmarAction({ request: requisicao(`/apelido/confirmar/${token}`, { method: "POST", body: formulario({}) }), params: { token }, context: t.contexto() } as never)) as Response;
     expect(r.status).toBe(302);
     expect(r.headers.get("Location")).toBe("/ranking?apelido=pastel_de_vento");
     const cookie = r.headers.get("Set-Cookie")!;
@@ -80,10 +88,12 @@ describe("confirmar apelido", () => {
     expect(cookie).toContain("Max-Age=31536000");
   });
 
-  test("token reutilizado cai na página de link usado", async () => {
+  test("token reutilizado cai na página de link usado, no GET e no POST", async () => {
     const token = tokenDoUltimoEmail();
     const d = await confirmarLoader({ request: requisicao(`/apelido/confirmar/${token}`), params: { token }, context: t.contexto() } as never);
-    expect(d).toEqual({ ok: false });
+    expect(d).toEqual({ nome: null, valido: false });
+    const p = await confirmarAction({ request: requisicao(`/apelido/confirmar/${token}`, { method: "POST", body: formulario({}) }), params: { token }, context: t.contexto() } as never);
+    expect(p).toEqual({ ok: false });
   });
 
   test("o comprovante do doador passa a mostrar o vínculo feito", async () => {

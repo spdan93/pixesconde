@@ -94,8 +94,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       if (!r.ok) {
         return data({ erroTroca: r.motivo === "duplicada" ? MENSAGEM_DUPLICADA : mensagemRecusa(r.motivo), erro: null }, { status: 400 });
       }
-      // Chave nova: o que estava retido volta a ser agrupado.
-      await s.repasses.agendarParaRecebedor(recebedor.id);
+      // Chave nova: o que estava retido volta a ser agrupado — na hora só no gatilho imediato;
+      // no diário, o próximo lote pega.
+      if ((await s.config()).gatilhoRepasse === "imediato") await s.repasses.agendarParaRecebedor(recebedor.id);
       break;
     }
   }

@@ -247,10 +247,12 @@ export function criarServicoRecebedores(db: Db, segredos: Segredos): ServicoRece
             .set({ ativa: false, desativadaEm: new Date() })
             .where(and(eq(chavesPix.recebedorId, id), eq(chavesPix.ativa, true)));
           await tx.insert(chavesPix).values({ recebedorId: id, chaveCifrada, chaveHmac: hmac, ativa: true });
+          // Chave nova precisa ser validada no primeiro repasse. Pausado continua pausado e
+          // removido continua fora: trocar a chave nunca recoloca ninguém na roda por tabela.
           await tx
             .update(recebedores)
             .set({ status: "aguardando_validacao", invalidaDesde: null, atualizadoEm: new Date() })
-            .where(eq(recebedores.id, id));
+            .where(and(eq(recebedores.id, id), inArray(recebedores.status, ["ativa", "aguardando_validacao", "invalida"])));
         });
       } catch (erro) {
         if (ehViolacaoDeUnicidade(erro)) return { ok: false, motivo: "duplicada" };

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lte, ne, notInArray, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "@/infra/db/client";
 import type { Config } from "@/infra/db/config";
 import { doacoes, recebedores, repasses } from "@/infra/db/schema";
@@ -9,6 +9,8 @@ import { lancar } from "@/domain/razao/servico";
 
 export const DESCRICAO_PIX = "PIX ESCONDE";
 export const MAX_TENTATIVAS = 5;
+/** Repasses que falharam de vez, seguidos, até o recebedor ser tratado como chave inválida (vai para troca/devolução). */
+export const MAX_REPASSES_FALHOS = 3;
 /** Um repasse 'enviando' só entra na conciliação depois disso: cobre a chamada em curso de outro processo. */
 export const CARENCIA_CONCILIACAO_MIN = 5;
 
@@ -156,10 +158,25 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
     return linhas.length === 1;
   }
 
+  /**
+   * Falha definitiva por motivo que não é "chave inválida" não pode virar loop diário eterno:
+   * depois de MAX_REPASSES_FALHOS repasses falhos para o mesmo recebedor, ele é tratado como
+   * chave inválida — a página secreta pede troca e, sem troca, a devolução de 30 dias se aplica.
+   */
+  async function conferirFalhasRepetidas(recebedorId: string) {
+    const [linha] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(repasses)
+      .where(and(eq(repasses.recebedorId, recebedorId), eq(repasses.status, "falhou")));
+    if (Number(linha?.n ?? 0) >= MAX_REPASSES_FALHOS) await svcRecebedores.marcarInvalida(recebedorId);
+  }
+
   async function reagendar(r: Repasse, provedorId: string | null, erro: string): Promise<"reagendado" | "falhou" | "ignorado"> {
     const tentativas = r.tentativas + 1;
     if (tentativas > MAX_TENTATIVAS) {
-      return (await falharDeVez(r, provedorId, `desistiu após ${MAX_TENTATIVAS} tentativas: ${erro}`)) ? "falhou" : "ignorado";
+      if (!(await falharDeVez(r, provedorId, `desistiu após ${MAX_TENTATIVAS} tentativas: ${erro}`))) return "ignorado";
+      await conferirFalhasRepetidas(r.recebedorId);
+      return "falhou";
     }
     const linhas = await db
       .update(repasses)

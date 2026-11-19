@@ -15,6 +15,8 @@
 	"vars": {
 		"PROVEDOR_PAGAMENTO": "fake",
 		"PROVEDOR_REPASSE": "fake",
+		"PROVEDOR_EMAIL": "console",
+		"PROVEDOR_CAPTCHA": "sempre-ok",
 		"URL_PUBLICA": "http://localhost:5173"
 	},
 	// Em dev, a string de conexão local vem de
