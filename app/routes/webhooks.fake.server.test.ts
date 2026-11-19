@@ -98,3 +98,16 @@ describe("comprovante", () => {
     expect(com.ehODoador).toBe(true);
   });
 });
+
+describe("comprovante não vaza o que está oculto", () => {
+  test("mensagem denunciada não vai para o cliente, e o id interno do recebedor também não", async () => {
+    const r = await t.servicos.doacoes.criarIntencao({ numeroPublico: 1, valorTexto: "5", mensagem: "texto ofensivo", apelido: "", apelidoIdDoCookie: null });
+    if (!r.ok) throw new Error("setup");
+    await postar(`doa_${r.doacaoId}`, "aprovado");
+    await t.servicos.apelidos.denunciar(r.doacaoId, "ofensiva");
+    const d = await comprovanteLoader({ request: requisicao(`/comprovante/${r.doacaoId}`), params: { id: r.doacaoId }, context: t.contexto() } as never);
+    expect(d.comprovante.mensagem).toBeNull();
+    expect(d.comprovante.mensagemOculta).toBe(true);
+    expect("recebedorId" in d.comprovante).toBe(false);
+  });
+});

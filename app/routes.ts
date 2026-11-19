@@ -5,6 +5,8 @@ export default [
   route("chaves", "routes/chaves.tsx"),
   route("sortear", "routes/sortear.tsx"),
   route("como-funciona", "routes/como-funciona.tsx"),
+  route("cadastrar", "routes/cadastrar.tsx"),
+  route("k/:token", "routes/k.tsx"),
   route("mandar/:numero", "routes/mandar.tsx"),
   route("comprovante/:id", "routes/comprovante.tsx"),
   route("dev/pagar/:ref", "routes/dev.pagar.tsx"),

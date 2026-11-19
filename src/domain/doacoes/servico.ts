@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import type { Db } from "@/infra/db/client";
 import type { Config } from "@/infra/db/config";
 import { apelidos, doacoes, eventosWebhook, repasses, recebedores as recebedoresNumero } from "@/infra/db/schema";
@@ -45,6 +45,20 @@ export type Comprovante = {
 
 export type AgendadorRepasses = { agendarParaRecebedor(recebedorId: string): Promise<string | null> };
 
+export type DoacaoDoRecebedor = {
+  id: string;
+  status: StatusDoacao;
+  valorCentavos: number;
+  taxaCentavos: number;
+  liquidoCentavos: number;
+  mensagem: string | null;
+  mensagemOculta: boolean;
+  apelido: string | null;
+  confirmadaEm: Date | null;
+  /** "concluido" quando o Pix já saiu; "pendente" para tudo que ainda não saiu. */
+  repasse: "concluido" | "pendente";
+};
+
 export interface ServicoDoacoes {
   criarIntencao(i: {
     numeroPublico: number;
@@ -63,6 +77,8 @@ export interface ServicoDoacoes {
   expirarIntencoes(): Promise<number>;
   buscarComprovante(id: string): Promise<Comprovante | null>;
   estornar(doacaoId: string, motivo: string): Promise<boolean>;
+  /** Para a página secreta: o que chegou para o recebedor, do mais novo para o mais velho. */
+  listarDoRecebedor(recebedorId: string): Promise<DoacaoDoRecebedor[]>;
   /** Resolve estornos que ficaram ambíguos (exceção no reembolso): pergunta ao provedor e fecha ou reverte. */
   conciliarEstornos(): Promise<{ estornadas: number; revertidas: number }>;
   /** Injeção tardia para evitar ciclo doacoes ↔ repasses. */
@@ -349,6 +365,27 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
       const estornou = await fecharEstorno(d);
       if (estornou) console.info(`[doacoes] estornada ${doacaoId}: ${motivo}`);
       return estornou;
+    },
+
+    async listarDoRecebedor(recebedorId) {
+      const linhas = await db
+        .select({ d: doacoes, repasseStatus: repasses.status })
+        .from(doacoes)
+        .leftJoin(repasses, eq(repasses.id, doacoes.repasseId))
+        .where(and(eq(doacoes.recebedorId, recebedorId), inArray(doacoes.status, ["confirmada", "estornando", "estornada"])))
+        .orderBy(desc(doacoes.confirmadaEm), desc(doacoes.numeroComprovante));
+      return linhas.map(({ d, repasseStatus }) => ({
+        id: d.id,
+        status: d.status,
+        valorCentavos: d.valorCentavos,
+        taxaCentavos: d.taxaCentavos,
+        liquidoCentavos: d.liquidoCentavos,
+        mensagem: d.mensagem,
+        mensagemOculta: d.mensagemOculta,
+        apelido: d.apelidoTexto,
+        confirmadaEm: d.confirmadaEm,
+        repasse: repasseStatus === "concluido" ? ("concluido" as const) : ("pendente" as const),
+      }));
     },
 
     async conciliarEstornos() {

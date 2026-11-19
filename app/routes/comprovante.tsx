@@ -34,7 +34,13 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   if (!comprovante) throw new Response("comprovante não encontrado", { status: 404 });
   const segredo = lerCookie(request, nomeCookieDoador(params.id));
   const ehODoador = await s.apelidos.ehODoador(params.id, segredo);
-  return { comprovante, ehODoador, urlPublica: s.urlPublica };
+  // O que vai para o navegador é público: nada de mensagem oculta nem id interno do recebedor.
+  const { recebedorId: _interno, ...publico } = comprovante;
+  return {
+    comprovante: { ...publico, mensagem: comprovante.mensagemOculta ? null : comprovante.mensagem },
+    ehODoador,
+    urlPublica: s.urlPublica,
+  };
 }
 
 export default function Comprovante({ loaderData: d, actionData }: Route.ComponentProps) {
