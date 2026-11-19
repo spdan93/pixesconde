@@ -34,6 +34,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # `wrangler types` tira os nomes dos segredos do .dev.vars; o example tem os nomes, sem valor.
+      - run: cp .dev.vars.example .dev.vars
       - run: pnpm typecheck
       - run: pnpm test
 
