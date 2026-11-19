@@ -1,38 +1,33 @@
-import {
-  isRouteErrorResponse,
-  Links,
-  Meta,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
-} from "react-router";
-
+import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/root";
 import "./app.css";
+import { servicosContext } from "./contexto.server";
+import { formatarBp } from "@/domain/dinheiro";
+import { Cabecalho } from "./componentes/Cabecalho";
+import { Rodape } from "./componentes/Rodape";
+
+export async function loader({ context }: Route.LoaderArgs) {
+  const { config } = context.get(servicosContext);
+  const cfg = await config();
+  return { taxaTexto: formatarBp(cfg.taxaBp) };
+}
 
 export const links: Route.LinksFunction = () => [
-  { rel: "preconnect", href: "https://fonts.googleapis.com" },
-  {
-    rel: "preconnect",
-    href: "https://fonts.gstatic.com",
-    crossOrigin: "anonymous",
-  },
-  {
-    rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap",
-  },
+  { rel: "preload", href: "/fonts/ibm-plex-mono-400-normal.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
+  { rel: "preload", href: "/fonts/archivo-narrow-700-normal.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#ffffff" />
         <Meta />
         <Links />
       </head>
-      <body>
+      <body className="min-h-screen">
         {children}
         <ScrollRestoration />
         <Scripts />
@@ -42,34 +37,48 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  return <Outlet />;
+  const dados = useRouteLoaderData<typeof loader>("root");
+  return (
+    <>
+      <Cabecalho />
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+        <Outlet />
+      </main>
+      <Rodape taxaTexto={dados?.taxaTexto ?? "10%"} />
+    </>
+  );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = "Oops!";
-  let details = "An unexpected error occurred.";
+  let titulo = "Deu ruim. Não foi você.";
+  let detalhe = "Alguma coisa quebrou do nosso lado. Tenta de novo daqui a pouco.";
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? "404" : "Error";
-    details =
-      error.status === 404
-        ? "The requested page could not be found."
-        : error.statusText || details;
-  } else if (import.meta.env.DEV && error && error instanceof Error) {
-    details = error.message;
+    if (error.status === 404) {
+      titulo = "Isso aqui não existe.";
+      detalhe = "Ou nunca existiu, ou alguém tirou da roda. Não dá pra saber, e é assim mesmo.";
+    } else {
+      titulo = `Erro ${error.status}`;
+      detalhe = error.statusText || detalhe;
+    }
+  } else if (import.meta.env.DEV && error instanceof Error) {
+    detalhe = error.message;
     stack = error.stack;
   }
 
   return (
-    <main className="pt-16 p-4 container mx-auto">
-      <h1>{message}</h1>
-      <p>{details}</p>
-      {stack && (
-        <pre className="w-full p-4 overflow-x-auto">
-          <code>{stack}</code>
-        </pre>
-      )}
-    </main>
+    <>
+      <Cabecalho />
+      <main className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+        <h1 className="font-titulo text-5xl font-bold leading-none tracking-tight">{titulo}</h1>
+        <p className="mt-4 max-w-xl text-cinza">{detalhe}</p>
+        {stack && (
+          <pre className="mt-8 overflow-x-auto border-2 border-tinta p-4 text-xs">
+            <code>{stack}</code>
+          </pre>
+        )}
+      </main>
+    </>
   );
 }

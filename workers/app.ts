@@ -1,4 +1,6 @@
-import { createRequestHandler } from "react-router";
+import { createRequestHandler, RouterContextProvider } from "react-router";
+import { cloudflareContext, servicosContext } from "~/contexto.server";
+import { montarServicos, rodarCron } from "~/servicos.server";
 
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
@@ -6,7 +8,19 @@ const requestHandler = createRequestHandler(
 );
 
 export default {
-  async fetch(request) {
-    return requestHandler(request);
+  async fetch(request, env, ctx) {
+    const servicos = montarServicos(env);
+    const context = new RouterContextProvider();
+    context.set(cloudflareContext, { env, ctx });
+    context.set(servicosContext, servicos);
+    try {
+      return await requestHandler(request, context);
+    } finally {
+      ctx.waitUntil(servicos.fechar());
+    }
+  },
+
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(rodarCron(env));
   },
 } satisfies ExportedHandler<Env>;
