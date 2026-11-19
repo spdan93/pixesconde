@@ -12,9 +12,15 @@ export class FakeSaida implements ProvedorSaida {
   readonly envios: { refExterna: string; chavePix: string; valorCentavos: number; descricao: string }[] = [];
   private readonly porRef = new Map<string, StatusConsulta>();
   private erroPendente: Error | null = null;
+  private ganchoEnvio: (() => Promise<void>) | null = null;
 
   lancarNoProximoEnvio(erro: Error) {
     this.erroPendente = erro;
+  }
+
+  /** Roda no meio do próximo envio: simula outro processo mexendo no banco enquanto a chamada está em curso. */
+  aoEnviar(fn: () => Promise<void>) {
+    this.ganchoEnvio = fn;
   }
 
   definirConsulta(refExterna: string, status: StatusConsulta) {
@@ -28,6 +34,11 @@ export class FakeSaida implements ProvedorSaida {
       throw erro;
     }
     this.envios.push(i);
+    if (this.ganchoEnvio) {
+      const fn = this.ganchoEnvio;
+      this.ganchoEnvio = null;
+      await fn();
+    }
     const idProvedor = `fake_${i.refExterna}`;
     if (i.chavePix.startsWith("00000000")) {
       this.porRef.set(i.refExterna, "falhou");

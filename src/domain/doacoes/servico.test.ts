@@ -263,3 +263,45 @@ describe("estorno com reembolso falho", () => {
     expect(await saldo(db)).toBe(antes);
   });
 });
+
+describe("reembolso ambíguo", () => {
+  async function confirmada(valorTexto = "5") {
+    const r = await servico.criarIntencao({ ...base, valorTexto, mensagem: "", apelido: "" });
+    if (!r.ok) throw new Error("setup");
+    entrada.marcarResultado(`doa_${r.doacaoId}`, "aprovado");
+    await servico.processarNotificacao({ provedor: "fake", idExterno: `evt_${r.doacaoId}`, refExterna: `doa_${r.doacaoId}`, idProvedor: null, payload: {} });
+    return r.doacaoId;
+  }
+
+  test("exceção no reembolso deixa 'estornando' (fora do alcance do repasse) até a conciliação", async () => {
+    const id = await confirmada();
+    const antes = await saldo(db);
+    entrada.lancarNoProximoReembolso(new Error("timeout"));
+    expect(await servico.estornar(id, "teste")).toBe(false);
+    let [d] = await db.select().from(doacoes).where(eq(doacoes.id, id));
+    expect(d!.status).toBe("estornando");
+    expect(await saldo(db)).toBe(antes);
+    // provedor não registrou reembolso: volta a confirmada
+    entrada.definirConsultaReembolso(d!.provedorPagamentoId!, "desconhecido");
+    relogio = new Date(relogio.getTime() + 6 * 60_000);
+    expect(await servico.conciliarEstornos()).toEqual({ estornadas: 0, revertidas: 1 });
+    [d] = await db.select().from(doacoes).where(eq(doacoes.id, id));
+    expect(d!.status).toBe("confirmada");
+  });
+
+  test("exceção no reembolso, mas o provedor diz que reembolsou: fecha como estornada com reversões", async () => {
+    const id = await confirmada("20");
+    const antes = await saldo(db);
+    entrada.lancarNoProximoReembolso(new Error("timeout"));
+    await servico.estornar(id, "teste");
+    const [d] = await db.select().from(doacoes).where(eq(doacoes.id, id));
+    entrada.definirConsultaReembolso(d!.provedorPagamentoId!, "concluido");
+    // dentro da carência nada acontece
+    expect(await servico.conciliarEstornos()).toEqual({ estornadas: 0, revertidas: 0 });
+    relogio = new Date(relogio.getTime() + 6 * 60_000);
+    expect(await servico.conciliarEstornos()).toEqual({ estornadas: 1, revertidas: 0 });
+    const [d2] = await db.select().from(doacoes).where(eq(doacoes.id, id));
+    expect(d2!.status).toBe("estornada");
+    expect(await saldo(db)).toBe(antes - 1800);
+  });
+});

@@ -31,6 +31,8 @@ export const doacoes = pgTable(
     criadaEm: timestamp("criada_em", { withTimezone: true }).notNull().defaultNow(),
     expiraEm: timestamp("expira_em", { withTimezone: true }).notNull(),
     confirmadaEm: timestamp("confirmada_em", { withTimezone: true }),
+    /** Quando a doação entrou em 'estornando'; a conciliação só olha quem está assim há mais que a carência. */
+    estornoIniciadoEm: timestamp("estorno_iniciado_em", { withTimezone: true }),
     estornadaEm: timestamp("estornada_em", { withTimezone: true }),
   },
   (t) => [

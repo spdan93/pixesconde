@@ -24,7 +24,7 @@
 		{
 			"binding": "HYPERDRIVE",
 			"id": "00000000000000000000000000000000",
-			"localConnectionString": "postgres://postgres@localhost:5433/pix_esconde"
+			"localConnectionString": "postgres://postgres:postgres@localhost:5433/pix_esconde"
 		}
 	],
 	"triggers": {

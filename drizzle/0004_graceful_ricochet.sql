@@ -1,0 +1,1 @@
+ALTER TABLE "doacoes" ADD COLUMN "estorno_iniciado_em" timestamp with time zone;

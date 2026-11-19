@@ -248,3 +248,21 @@ describe("carência da conciliação", () => {
     expect(rep!.status).toBe("agendado"); // provedor não conhece: nunca saiu
   });
 });
+
+describe("compare-and-swap na transição", () => {
+  test("se outro processo reclamou de novo enquanto o envio estava em curso, a conclusão antiga não se aplica", async () => {
+    const n = await cadastrar("cas", "77777777-04b1-4d8a-9f27-c21e5a6b0d93");
+    await doar(n, "5");
+    const repasseId = await servico.agendarParaRecebedor(ids.cas!);
+    const antes = await saldo(db);
+    // durante o envio de A, a conciliação reagenda e um processo B reclama a linha de novo
+    saida.aoEnviar(async () => {
+      await db.update(repasses).set({ status: "enviando", reclamadoEm: new Date(relogio.getTime() + 1) }).where(eq(repasses.id, repasseId!));
+    });
+    const r = await servico.processarAgendados();
+    expect(r.concluidos).toBe(0);
+    const [rep] = await db.select().from(repasses).where(eq(repasses.id, repasseId!));
+    expect(rep!.status).toBe("enviando"); // a reivindicação de B segue intocada
+    expect(await saldo(db)).toBe(antes); // e nada foi lançado por A
+  });
+});

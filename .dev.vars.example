@@ -2,7 +2,8 @@
 CHAVE_CIFRA=
 SEGREDO_HMAC=
 SEGREDO_COOKIE=
-# Postgres local (docker start pix-esconde-pg). Em produção o Hyperdrive aponta para o Supabase.
-CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres@localhost:5433/pix_esconde
+# Postgres local (docker start pix-esconde-pg; usuário postgres, senha postgres, só em localhost).
+# Em produção o Hyperdrive aponta para o pooler do Supabase.
+CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://postgres:postgres@localhost:5433/pix_esconde
 # Usado por drizzle-kit e pelos scripts em Node (migrar, seed, operação)
-DATABASE_URL=postgres://postgres@localhost:5433/pix_esconde
+DATABASE_URL=postgres://postgres:postgres@localhost:5433/pix_esconde

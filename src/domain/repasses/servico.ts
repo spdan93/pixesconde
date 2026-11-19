@@ -119,14 +119,23 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
     return r ?? null;
   }
 
-  // Toda transição a partir de 'enviando' é condicional ao estado: se outro processo já
-  // mexeu, esta chamada não faz nada e, sobretudo, não lança no razão.
+  // Toda transição a partir de 'enviando' é um compare-and-swap sobre a reivindicação
+  // (status + reclamadoEm do instantâneo): se outro processo reclamou a linha de novo
+  // enquanto esta chamada estava em curso, nada se aplica e nada vai para o razão.
+  function mesmaReivindicacao(r: Repasse) {
+    return and(
+      eq(repasses.id, r.id),
+      eq(repasses.status, "enviando"),
+      r.reclamadoEm ? eq(repasses.reclamadoEm, r.reclamadoEm) : isNull(repasses.reclamadoEm),
+    );
+  }
+
   async function concluir(r: Repasse, provedorId: string): Promise<boolean> {
     const ok = await db.transaction(async (tx) => {
       const atualizados = await tx
         .update(repasses)
         .set({ status: "concluido", provedorId, concluidoEm: agora(), erro: null })
-        .where(and(eq(repasses.id, r.id), eq(repasses.status, "enviando")))
+        .where(mesmaReivindicacao(r))
         .returning({ id: repasses.id });
       if (atualizados.length === 0) return false;
       await lancar(tx, { tipo: "saida", valorCentavos: -r.valorCentavos, repasseId: r.id });
@@ -142,7 +151,7 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
     const linhas = await db
       .update(repasses)
       .set({ status: "falhou", provedorId, erro, tentativas: r.tentativas + 1 })
-      .where(and(eq(repasses.id, r.id), eq(repasses.status, "enviando")))
+      .where(mesmaReivindicacao(r))
       .returning({ id: repasses.id });
     return linhas.length === 1;
   }
@@ -162,7 +171,7 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
         reclamadoEm: null,
         agendadoPara: new Date(agora().getTime() + 2 ** tentativas * 60_000),
       })
-      .where(and(eq(repasses.id, r.id), eq(repasses.status, "enviando")))
+      .where(mesmaReivindicacao(r))
       .returning({ id: repasses.id });
     return linhas.length === 1 ? "reagendado" : "ignorado";
   }
@@ -226,13 +235,13 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
           // Erro ambíguo (timeout, rede): o Pix pode ter saído. Fica em 'enviando' até a
           // conciliação perguntar ao provedor; nunca reenvia no escuro.
           const msg = erro instanceof Error ? erro.message : String(erro);
-          await db.update(repasses).set({ erro: `indeterminado: ${msg}` }).where(eq(repasses.id, r.id));
+          await db.update(repasses).set({ erro: `indeterminado: ${msg}` }).where(mesmaReivindicacao(r));
           continue;
         }
         if (envio.status === "concluido") {
           if (await concluir(r, envio.idProvedor)) concluidos++;
         } else if (envio.status === "processando") {
-          await db.update(repasses).set({ provedorId: envio.idProvedor }).where(eq(repasses.id, r.id));
+          await db.update(repasses).set({ provedorId: envio.idProvedor }).where(mesmaReivindicacao(r));
         } else if (envio.chaveInvalida) {
           if (await falharDeVez(r, envio.idProvedor, envio.erro ?? "chave inválida")) {
             await svcRecebedores.marcarInvalida(r.recebedorId);

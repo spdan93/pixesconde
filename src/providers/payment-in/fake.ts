@@ -1,4 +1,4 @@
-import type { ProvedorEntrada, StatusCobranca } from "../tipos";
+import type { ProvedorEntrada, StatusCobranca, StatusEnvio } from "../tipos";
 
 type Cobranca = { valorCentavos: number; status: StatusCobranca; idProvedor: string };
 
@@ -35,18 +35,40 @@ export class FakeEntrada implements ProvedorEntrada {
   }
 
   private erroReembolso: string | null = null;
+  private excecaoReembolso: Error | null = null;
+  private readonly consultasReembolso = new Map<string, StatusEnvio | "desconhecido">();
 
+  /** Falha definitiva: o provedor responde que não reembolsou. */
   falharProximoReembolso(erro: string) {
     this.erroReembolso = erro;
   }
 
+  /** Falha ambígua: a chamada estoura (timeout, rede). */
+  lancarNoProximoReembolso(erro: Error) {
+    this.excecaoReembolso = erro;
+  }
+
+  definirConsultaReembolso(idProvedor: string, status: StatusEnvio | "desconhecido") {
+    this.consultasReembolso.set(idProvedor, status);
+  }
+
   async reembolsar(i: { idProvedor: string; valorCentavos: number }) {
+    if (this.excecaoReembolso) {
+      const e = this.excecaoReembolso;
+      this.excecaoReembolso = null;
+      throw e;
+    }
     if (this.erroReembolso) {
       const erro = this.erroReembolso;
       this.erroReembolso = null;
       return { ok: false, erro };
     }
     this.reembolsos.push(i);
+    this.consultasReembolso.set(i.idProvedor, "concluido");
     return { ok: true };
+  }
+
+  async consultarReembolso(i: { idProvedor: string }) {
+    return { status: this.consultasReembolso.get(i.idProvedor) ?? ("desconhecido" as const) };
   }
 }

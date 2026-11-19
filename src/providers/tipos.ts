@@ -21,7 +21,10 @@ export interface ProvedorEntrada {
     valorCentavos: number | null;
     idProvedor: string | null;
   }>;
+  /** `ok: false` é falha definitiva (nada foi devolvido). Exceção = ambíguo, vai para conciliação. */
   reembolsar(i: { idProvedor: string; valorCentavos: number }): Promise<{ ok: boolean; erro?: string }>;
+  /** Conciliação de estorno: "desconhecido" = o provedor não tem reembolso para esse pagamento. */
+  consultarReembolso(i: { idProvedor: string }): Promise<{ status: StatusEnvio | "desconhecido" }>;
 }
 
 export interface ProvedorSaida {

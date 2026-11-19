@@ -11,6 +11,8 @@ import { lancar } from "@/domain/razao/servico";
 import { gerarToken, sha256Hex } from "@/infra/crypto";
 
 export const DESCRITOR_FATURA = "PIXESCONDE";
+/** Doação em 'estornando' só entra na conciliação depois disso. */
+export const CARENCIA_ESTORNO_MIN = 5;
 
 export type StatusDoacao = (typeof doacoes.$inferSelect)["status"];
 
@@ -61,6 +63,8 @@ export interface ServicoDoacoes {
   expirarIntencoes(): Promise<number>;
   buscarComprovante(id: string): Promise<Comprovante | null>;
   estornar(doacaoId: string, motivo: string): Promise<boolean>;
+  /** Resolve estornos que ficaram ambíguos (exceção no reembolso): pergunta ao provedor e fecha ou reverte. */
+  conciliarEstornos(): Promise<{ estornadas: number; revertidas: number }>;
   /** Injeção tardia para evitar ciclo doacoes ↔ repasses. */
   setRepasses(r: AgendadorRepasses): void;
 }
@@ -98,6 +102,29 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
   async function concluirEvento(eventoId: string | null, resultado: string) {
     if (!eventoId) return;
     await db.update(eventosWebhook).set({ processadoEm: agora(), resultado }).where(eq(eventosWebhook.id, eventoId));
+  }
+
+  async function reverterEstorno(doacaoId: string): Promise<boolean> {
+    const linhas = await db
+      .update(doacoes)
+      .set({ status: "confirmada", estornoIniciadoEm: null })
+      .where(and(eq(doacoes.id, doacaoId), eq(doacoes.status, "estornando")))
+      .returning({ id: doacoes.id });
+    return linhas.length === 1;
+  }
+
+  async function fecharEstorno(d: Pick<typeof doacoes.$inferSelect, "id" | "valorCentavos" | "taxaCentavos">): Promise<boolean> {
+    return db.transaction(async (tx) => {
+      const atualizadas = await tx
+        .update(doacoes)
+        .set({ status: "estornada", estornadaEm: agora(), repasseId: null })
+        .where(and(eq(doacoes.id, d.id), eq(doacoes.status, "estornando")))
+        .returning({ id: doacoes.id });
+      if (atualizadas.length === 0) return false;
+      await lancar(tx, { tipo: "reversao_entrada", valorCentavos: -d.valorCentavos, doacaoId: d.id });
+      await lancar(tx, { tipo: "reversao_taxa", valorCentavos: d.taxaCentavos, doacaoId: d.id });
+      return true;
+    });
   }
 
   return {
@@ -289,7 +316,7 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
       //    Condicional ao estado lido, para fechar a janela entre a leitura e a reserva.
       const reservadas = await db
         .update(doacoes)
-        .set({ status: "estornando" })
+        .set({ status: "estornando", estornoIniciadoEm: agora() })
         .where(
           and(
             eq(doacoes.id, doacaoId),
@@ -300,30 +327,53 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
         .returning({ id: doacoes.id });
       if (reservadas.length === 0) return false;
 
-      // 2) Reembolso no provedor. Falhou: devolve ao estado anterior e não lança nada.
+      // 2) Reembolso no provedor. Falha definitiva (ok: false): volta a 'confirmada'.
+      //    Exceção (timeout, rede) é ambígua: fica 'estornando', fora do alcance do repasse,
+      //    e conciliarEstornos decide depois perguntando ao provedor.
       if (d.provedorPagamentoId) {
-        const reembolso = await provedores.entrada.reembolsar({ idProvedor: d.provedorPagamentoId, valorCentavos: d.valorCentavos });
+        let reembolso: { ok: boolean; erro?: string };
+        try {
+          reembolso = await provedores.entrada.reembolsar({ idProvedor: d.provedorPagamentoId, valorCentavos: d.valorCentavos });
+        } catch (erro) {
+          console.error(`[doacoes] reembolso indeterminado em ${doacaoId}:`, erro);
+          return false;
+        }
         if (!reembolso.ok) {
           console.error(`[doacoes] reembolso falhou em ${doacaoId}: ${reembolso.erro ?? "sem detalhe"}`);
-          await db.update(doacoes).set({ status: "confirmada" }).where(and(eq(doacoes.id, doacaoId), eq(doacoes.status, "estornando")));
+          await reverterEstorno(doacaoId);
           return false;
         }
       }
 
       // 3) Fecha: estornada + reversões no razão.
-      const estornou = await db.transaction(async (tx) => {
-        const atualizadas = await tx
-          .update(doacoes)
-          .set({ status: "estornada", estornadaEm: agora(), repasseId: null })
-          .where(and(eq(doacoes.id, doacaoId), eq(doacoes.status, "estornando")))
-          .returning({ id: doacoes.id });
-        if (atualizadas.length === 0) return false;
-        await lancar(tx, { tipo: "reversao_entrada", valorCentavos: -d.valorCentavos, doacaoId });
-        await lancar(tx, { tipo: "reversao_taxa", valorCentavos: d.taxaCentavos, doacaoId });
-        return true;
-      });
+      const estornou = await fecharEstorno(d);
       if (estornou) console.info(`[doacoes] estornada ${doacaoId}: ${motivo}`);
       return estornou;
+    },
+
+    async conciliarEstornos() {
+      const limite = new Date(agora().getTime() - CARENCIA_ESTORNO_MIN * 60_000);
+      const presas = await db
+        .select()
+        .from(doacoes)
+        .where(and(eq(doacoes.status, "estornando"), lt(doacoes.estornoIniciadoEm, limite)))
+        .limit(50);
+      let estornadas = 0;
+      let revertidas = 0;
+      for (const d of presas) {
+        if (!d.provedorPagamentoId) {
+          if (await fecharEstorno(d)) estornadas++;
+          continue;
+        }
+        const { status } = await provedores.entrada.consultarReembolso({ idProvedor: d.provedorPagamentoId });
+        if (status === "concluido") {
+          if (await fecharEstorno(d)) estornadas++;
+        } else if (status === "falhou" || status === "desconhecido") {
+          if (await reverterEstorno(d.id)) revertidas++;
+        }
+        // "processando": espera a próxima rodada.
+      }
+      return { estornadas, revertidas };
     },
   };
 }

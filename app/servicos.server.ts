@@ -41,7 +41,17 @@ function exigir(env: EnvServicos, nome: keyof EnvServicos): string {
 }
 
 /** Monta o grafo de serviços sobre uma conexão nova. Chamar `fechar()` ao fim da requisição. */
-export function montarServicos(env: EnvServicos, opts: { db?: Db; fechar?: () => Promise<void>; agora?: () => Date } = {}): Servicos {
+export type OpcoesServicos = {
+  /** Banco já aberto (testes com PGlite). */
+  db?: Db;
+  fechar?: () => Promise<void>;
+  agora?: () => Date;
+  /** Provedores compartilhados entre requisições simuladas (os falsos guardam estado em memória). */
+  provedores?: Provedores;
+  silencioso?: boolean;
+};
+
+export function montarServicos(env: EnvServicos, opts: OpcoesServicos = {}): Servicos {
   const conexao = opts.db ? { db: opts.db, fechar: opts.fechar ?? (async () => {}) } : criarDb(env.HYPERDRIVE.connectionString);
   const db = conexao.db;
   const segredos: Segredos = {
@@ -50,7 +60,7 @@ export function montarServicos(env: EnvServicos, opts: { db?: Db; fechar?: () =>
     segredoCookie: exigir(env, "SEGREDO_COOKIE"),
   };
   const urlPublica = exigir(env, "URL_PUBLICA").replace(/\/$/, "");
-  const provedores = criarProvedores(env);
+  const provedores = opts.provedores ?? criarProvedores(env, { silencioso: opts.silencioso });
 
   // Config lida uma vez por requisição.
   let configCache: Promise<Config> | null = null;
@@ -94,7 +104,8 @@ export async function rodarCron(env: EnvServicos, agora = new Date()): Promise<R
     }
     const { concluidos, falhos } = await s.repasses.processarAgendados();
     const devolvidas = await s.repasses.devolverRetidos(30);
-    const resumo = { expiradas, agendados, concluidos, falhos, devolvidas };
+    const estornos = await s.doacoes.conciliarEstornos();
+    const resumo = { expiradas, agendados, concluidos, falhos, devolvidas, ...estornos };
     console.log("[cron]", JSON.stringify(resumo));
     return resumo;
   } finally {
