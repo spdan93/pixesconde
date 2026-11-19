@@ -1,0 +1,8 @@
+# Mantém as actions fixadas por SHA atualizadas, com PR para a develop.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
