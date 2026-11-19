@@ -20,7 +20,7 @@ export function carregarDevVars() {
   }
 }
 
-export function abrirServicos(): Servicos & { fecharTudo(): Promise<void> } {
+export function abrirServicos(opts: { agora?: () => Date } = {}): Servicos & { fecharTudo(): Promise<void> } {
   carregarDevVars();
   const url = process.env.DATABASE_URL;
   if (!url) {
@@ -34,11 +34,12 @@ export function abrirServicos(): Servicos & { fecharTudo(): Promise<void> } {
       PROVEDOR_PAGAMENTO: process.env.PROVEDOR_PAGAMENTO ?? "fake",
       PROVEDOR_REPASSE: process.env.PROVEDOR_REPASSE ?? "fake",
       URL_PUBLICA: process.env.URL_PUBLICA ?? "http://localhost:5173",
+      MODO_DEMO: process.env.MODO_DEMO,
       CHAVE_CIFRA: process.env.CHAVE_CIFRA ?? "",
       SEGREDO_HMAC: process.env.SEGREDO_HMAC ?? "",
       SEGREDO_COOKIE: process.env.SEGREDO_COOKIE ?? "",
     },
-    { db, fechar, silencioso: true },
+    { db, fechar, silencioso: true, agora: opts.agora },
   );
   return { ...servicos, fecharTudo: fechar };
 }

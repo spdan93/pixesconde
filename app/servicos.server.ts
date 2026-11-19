@@ -89,7 +89,7 @@ export function montarServicos(env: EnvServicos, opts: OpcoesServicos = {}): Ser
   let configCache: Promise<Config> | null = null;
   const config = () => (configCache ??= lerConfig(db));
 
-  const recebedores = criarServicoRecebedores(db, segredos);
+  const recebedores = criarServicoRecebedores(db, segredos, opts.agora);
   const doacoes = criarServicoDoacoes({ db, provedores, recebedores, config, urlPublica, agora: opts.agora });
   const repasses = criarServicoRepasses({ db, provedores, recebedores, doacoes, config, agora: opts.agora });
   doacoes.setRepasses(repasses);

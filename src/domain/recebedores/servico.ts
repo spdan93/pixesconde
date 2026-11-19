@@ -49,7 +49,7 @@ export interface ServicoRecebedores {
 /** Recebedores que aparecem na lista e entram no sorteio. */
 const ELEGIVEIS: StatusRecebedor[] = ["ativa", "aguardando_validacao"];
 
-export function criarServicoRecebedores(db: Db, segredos: Segredos): ServicoRecebedores {
+export function criarServicoRecebedores(db: Db, segredos: Segredos, agora: () => Date = () => new Date()): ServicoRecebedores {
   const estatisticas = db
     .select({
       recebedorId: doacoes.recebedorId,
@@ -149,7 +149,7 @@ export function criarServicoRecebedores(db: Db, segredos: Segredos): ServicoRece
   async function mudarStatus(id: string, status: StatusRecebedor, extra: Partial<typeof recebedores.$inferInsert> = {}) {
     await db
       .update(recebedores)
-      .set({ status, atualizadoEm: new Date(), ...extra })
+      .set({ status, atualizadoEm: agora(), ...extra })
       .where(eq(recebedores.id, id));
   }
 
@@ -164,8 +164,8 @@ export function criarServicoRecebedores(db: Db, segredos: Segredos): ServicoRece
       const chaveCifrada = await cifrar(validacao.chave, segredos.chaveCifra);
       try {
         const numeroPublico = await db.transaction(async (tx) => {
-          const [r] = await tx.insert(recebedores).values({ tokenHash }).returning();
-          await tx.insert(chavesPix).values({ recebedorId: r!.id, chaveCifrada, chaveHmac: hmac, ativa: true });
+          const [r] = await tx.insert(recebedores).values({ tokenHash, criadoEm: agora(), atualizadoEm: agora() }).returning();
+          await tx.insert(chavesPix).values({ recebedorId: r!.id, chaveCifrada, chaveHmac: hmac, ativa: true, criadaEm: agora() });
           return r!.numeroPublico;
         });
         return { ok: true, numeroPublico, token };
@@ -229,7 +229,7 @@ export function criarServicoRecebedores(db: Db, segredos: Segredos): ServicoRece
     pausar: (id) => mudarStatus(id, "pausada"),
     reativar: (id) => mudarStatus(id, "ativa"),
     remover: (id) => mudarStatus(id, "removida"),
-    marcarInvalida: (id) => mudarStatus(id, "invalida", { invalidaDesde: new Date() }),
+    marcarInvalida: (id) => mudarStatus(id, "invalida", { invalidaDesde: agora() }),
     marcarAtiva: (id) => mudarStatus(id, "ativa", { invalidaDesde: null }),
 
     async trocarChave(id, entradaChave) {
@@ -244,14 +244,14 @@ export function criarServicoRecebedores(db: Db, segredos: Segredos): ServicoRece
         await db.transaction(async (tx) => {
           await tx
             .update(chavesPix)
-            .set({ ativa: false, desativadaEm: new Date() })
+            .set({ ativa: false, desativadaEm: agora() })
             .where(and(eq(chavesPix.recebedorId, id), eq(chavesPix.ativa, true)));
-          await tx.insert(chavesPix).values({ recebedorId: id, chaveCifrada, chaveHmac: hmac, ativa: true });
+          await tx.insert(chavesPix).values({ recebedorId: id, chaveCifrada, chaveHmac: hmac, ativa: true, criadaEm: agora() });
           // Chave nova precisa ser validada no primeiro repasse. Pausado continua pausado e
           // removido continua fora: trocar a chave nunca recoloca ninguém na roda por tabela.
           await tx
             .update(recebedores)
-            .set({ status: "aguardando_validacao", invalidaDesde: null, atualizadoEm: new Date() })
+            .set({ status: "aguardando_validacao", invalidaDesde: null, atualizadoEm: agora() })
             .where(and(eq(recebedores.id, id), inArray(recebedores.status, ["ativa", "aguardando_validacao", "invalida"])));
         });
       } catch (erro) {

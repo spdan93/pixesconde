@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { criarDbTeste } from "@/infra/db/teste";
 import type { Db } from "@/infra/db/client";
 import { criarServicoRecebedores, type ServicoRecebedores } from "./servico";
-import { doacoes } from "@/infra/db/schema";
+import { doacoes, recebedores } from "@/infra/db/schema";
+import { eq } from "drizzle-orm";
 
 const SEGREDOS = {
   chaveCifra: "wJ1m3n9Qq2v5x8z1A4c7E0g3I6k9M2o5R8t1V4w7Y0a=",
@@ -170,5 +171,20 @@ describe("revisão final", () => {
     await servico.marcarInvalida(priv!.id);
     await servico.trocarChave(priv!.id, "14141414-04b1-4d8a-9f27-c21e5a6b0d93");
     expect((await servico.buscarPorToken(r.token))!.status).toBe("aguardando_validacao");
+  });
+});
+
+describe("relógio injetado", () => {
+  test("cadastro e mudança de status usam o relógio do serviço, não o do sistema", async () => {
+    const quando = new Date("2026-01-02T03:04:05Z");
+    const comRelogio = criarServicoRecebedores(db, SEGREDOS, () => quando);
+    const r = await comRelogio.cadastrar("cafecafe-04b1-4d8a-9f27-c21e5a6b0d93");
+    if (!r.ok) throw new Error("setup");
+    const pub = await comRelogio.buscarPublico(r.numeroPublico);
+    await comRelogio.marcarInvalida(pub!.id);
+    const [linha] = await db.select().from(recebedores).where(eq(recebedores.id, pub!.id));
+    expect(linha!.criadoEm).toEqual(quando);
+    expect(linha!.atualizadoEm).toEqual(quando);
+    expect(linha!.invalidaDesde).toEqual(quando);
   });
 });
