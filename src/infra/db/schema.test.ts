@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { criarDbTeste } from "./teste";
 import { executarLinhas } from "./sql";
 import { gravarConfig, lerConfig } from "./config";
-import { chavesPix, recebedores } from "./schema";
+import { chavesPix, recebedores, repasses } from "./schema";
 import type { Db } from "./client";
 
 let db: Db;
@@ -94,5 +94,16 @@ describe("configuração", () => {
     expect(cfg.taxaBp).toBe(1500);
     expect(cfg.palavrasBloqueadas).toEqual(["bobo"]);
     expect(cfg.minimoCentavos).toBe(500);
+  });
+});
+
+describe("repasses", () => {
+  test("só um repasse agendado por recebedor", async () => {
+    const [r] = await db.insert(recebedores).values({ tokenHash: "rep" }).returning();
+    const [c] = await db.insert(chavesPix).values({ recebedorId: r!.id, chaveCifrada: "x", chaveHmac: "h-rep", ativa: true }).returning();
+    const base = { recebedorId: r!.id, chavePixId: c!.id, valorCentavos: 100, status: "agendado" as const };
+    await db.insert(repasses).values({ ...base, refExterna: "rep_a" });
+    await expect(db.insert(repasses).values({ ...base, refExterna: "rep_b" })).rejects.toThrow();
+    await db.insert(repasses).values({ ...base, refExterna: "rep_c", status: "concluido" });
   });
 });

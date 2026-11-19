@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { criarDbTeste } from "@/infra/db/teste";
 import type { Db } from "@/infra/db/client";
 import { gravarConfig, lerConfig } from "@/infra/db/config";
-import { doacoes, lancamentos } from "@/infra/db/schema";
+import { chavesPix, doacoes, lancamentos, repasses } from "@/infra/db/schema";
 import { criarProvedores } from "@/providers";
 import type { FakeEntrada } from "@/providers/payment-in/fake";
 import { criarServicoRecebedores, type ServicoRecebedores } from "@/domain/recebedores/servico";
@@ -227,5 +227,24 @@ describe("buscarComprovante", () => {
     });
     expect(c!.numeroComprovante).toBeGreaterThan(0);
     expect(await servico.buscarComprovante("00000000-0000-4000-8000-000000000000")).toBeNull();
+  });
+});
+
+describe("estorno e repasse", () => {
+  test("não estorna doação cujo repasse está agendado ou enviando", async () => {
+    const r = await servico.criarIntencao({ ...base, valorTexto: "5", mensagem: "", apelido: "" });
+    if (!r.ok) throw new Error("setup");
+    entrada.marcarResultado(`doa_${r.doacaoId}`, "aprovado");
+    await servico.processarNotificacao({ provedor: "fake", idExterno: "evt_10", refExterna: `doa_${r.doacaoId}`, idProvedor: null, payload: {} });
+    const [d] = await db.select().from(doacoes).where(eq(doacoes.id, r.doacaoId));
+    const [chave] = await db.select().from(chavesPix).where(eq(chavesPix.recebedorId, d!.recebedorId));
+    const [rep] = await db
+      .insert(repasses)
+      .values({ recebedorId: d!.recebedorId, chavePixId: chave!.id, valorCentavos: 450, status: "agendado", refExterna: "rep_teste" })
+      .returning();
+    await db.update(doacoes).set({ repasseId: rep!.id }).where(eq(doacoes.id, r.doacaoId));
+    expect(await servico.estornar(r.doacaoId, "tentativa")).toBe(false);
+    await db.update(repasses).set({ status: "falhou" }).where(eq(repasses.id, rep!.id));
+    expect(await servico.estornar(r.doacaoId, "agora pode")).toBe(true);
   });
 });

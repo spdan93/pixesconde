@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, ne, notInArray, or } from "drizzle-orm";
 import type { Db } from "@/infra/db/client";
 import type { Config } from "@/infra/db/config";
 import { doacoes, recebedores, repasses } from "@/infra/db/schema";
@@ -53,6 +53,13 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
     const chave = await svcRecebedores.obterChaveDecifrada(recebedorId);
     if (!chave) return null;
     return db.transaction(async (tx) => {
+      // Trava o recebedor: dois agrupamentos concorrentes (webhook + cron) ficam em fila.
+      const [rec] = await tx
+        .select({ status: recebedores.status })
+        .from(recebedores)
+        .where(eq(recebedores.id, recebedorId))
+        .for("update");
+      if (!rec || rec.status === "invalida") return null;
       const creditos = await creditosPendentes(tx, recebedorId);
       const soma = creditos.reduce((s, c) => s + c.liquido, 0);
       if (creditos.length === 0 || soma <= 0 || soma < cfg.minimoRepasseCentavos) return null;
@@ -66,10 +73,12 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
       let repasseId: string;
       if (aberto) {
         repasseId = aberto.id;
-        await tx
+        const atualizados = await tx
           .update(repasses)
           .set({ valorCentavos: aberto.valorCentavos + soma })
-          .where(eq(repasses.id, repasseId));
+          .where(and(eq(repasses.id, repasseId), eq(repasses.status, "agendado")))
+          .returning({ id: repasses.id });
+        if (atualizados.length !== 1) throw new Error("repasse saiu de 'agendado' durante o agrupamento");
       } else {
         repasseId = crypto.randomUUID();
         await tx.insert(repasses).values({
@@ -83,10 +92,18 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
           criadoEm: agora(),
         });
       }
-      await tx
+      const marcadas = await tx
         .update(doacoes)
         .set({ repasseId })
-        .where(inArray(doacoes.id, creditos.map((c) => c.id)));
+        .where(
+          and(
+            inArray(doacoes.id, creditos.map((c) => c.id)),
+            eq(doacoes.status, "confirmada"),
+            or(isNull(doacoes.repasseId), ne(doacoes.repasseId, repasseId)),
+          ),
+        )
+        .returning({ id: doacoes.id });
+      if (marcadas.length !== creditos.length) throw new Error("créditos mudaram durante o agrupamento");
       return repasseId;
     });
   }
@@ -171,9 +188,11 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
 
       let concluidos = 0;
       let falhos = 0;
+      const tratadosNestaRodada: string[] = [];
       for (const candidato of prontos) {
         const r = await reclamar(candidato.id);
         if (!r) continue; // outro processo pegou
+        tratadosNestaRodada.push(r.id);
         const chave = await svcRecebedores.obterChaveDecifrada(r.recebedorId);
         if (!chave) {
           await falharDeVez(r, null, "recebedor sem chave ativa");
@@ -192,8 +211,10 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
             descricao: DESCRICAO_PIX,
           });
         } catch (erro) {
+          // Erro ambíguo (timeout, rede): o Pix pode ter saído. Fica em 'enviando' até a
+          // conciliação perguntar ao provedor; nunca reenvia no escuro.
           const msg = erro instanceof Error ? erro.message : String(erro);
-          if ((await reagendar(r, null, msg)) === "falhou") falhos++;
+          await db.update(repasses).set({ erro: `indeterminado: ${msg}` }).where(eq(repasses.id, r.id));
           continue;
         }
         if (envio.status === "concluido") {
@@ -210,20 +231,27 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
         }
       }
 
-      // Envios que ficaram "processando" numa rodada anterior.
+      // Conciliação: o que ficou 'enviando' em rodadas anteriores (processando ou erro ambíguo).
       const emAndamento = await db
         .select()
         .from(repasses)
-        .where(and(eq(repasses.status, "enviando"), sql`${repasses.provedorId} is not null`))
+        .where(
+          and(
+            eq(repasses.status, "enviando"),
+            tratadosNestaRodada.length ? notInArray(repasses.id, tratadosNestaRodada) : undefined,
+          ),
+        )
         .limit(limite);
       for (const r of emAndamento) {
-        const { status } = await provedores.saida.consultar(r.provedorId!);
+        const { status } = await provedores.saida.consultar({ idProvedor: r.provedorId, refExterna: r.refExterna });
         if (status === "concluido") {
-          await concluir(r, r.provedorId!);
+          await concluir(r, r.provedorId ?? `conciliado_${r.refExterna}`);
           concluidos++;
-        } else if (status === "falhou") {
-          if ((await reagendar(r, r.provedorId, "provedor reportou falha")) === "falhou") falhos++;
+        } else if (status === "falhou" || status === "desconhecido") {
+          const motivo = status === "falhou" ? "provedor reportou falha" : "provedor não registrou o envio";
+          if ((await reagendar(r, r.provedorId, motivo)) === "falhou") falhos++;
         }
+        // "processando": continua esperando.
       }
       return { concluidos, falhos };
     },
@@ -244,7 +272,8 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
             and(
               eq(doacoes.recebedorId, rec.id),
               eq(doacoes.status, "confirmada"),
-              or(isNull(doacoes.repasseId), ne(repasses.status, "concluido")),
+              // só o que comprovadamente não saiu; agendado/enviando espera o desfecho
+              or(isNull(doacoes.repasseId), eq(repasses.status, "falhou")),
             ),
           );
         for (const d of presas) {

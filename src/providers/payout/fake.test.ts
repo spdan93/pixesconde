@@ -8,7 +8,8 @@ describe("FakeSaida", () => {
     const fake = new FakeSaida();
     const r = await fake.enviar({ ...base, chavePix: "7f3a9c2e-04b1-4d8a-9f27-c21e5a6b0d93" });
     expect(r).toEqual({ idProvedor: "fake_rep_1", status: "concluido", chaveInvalida: false });
-    expect(await fake.consultar("fake_rep_1")).toEqual({ status: "concluido" });
+    expect(await fake.consultar({ idProvedor: "fake_rep_1", refExterna: "rep_1" })).toEqual({ status: "concluido" });
+    expect(await fake.consultar({ idProvedor: null, refExterna: "nunca_enviado" })).toEqual({ status: "desconhecido" });
   });
 
   test("chave começando com 00000000 é inválida", async () => {

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "repasses_um_agendado_por_recebedor_unq" ON "repasses" USING btree ("recebedor_id") WHERE "repasses"."status" = 'agendado';

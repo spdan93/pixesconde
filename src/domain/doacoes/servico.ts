@@ -276,7 +276,10 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
         .leftJoin(repasses, eq(repasses.id, doacoes.repasseId))
         .where(eq(doacoes.id, doacaoId))
         .limit(1);
-      if (!linha || linha.doacao.status !== "confirmada" || linha.repasseStatus === "concluido") return false;
+      // Só estorna o que comprovadamente não saiu: sem repasse, ou com repasse que falhou.
+      // Agendado ou enviando pode virar Pix a qualquer momento: estornar seria pagar duas vezes.
+      if (!linha || linha.doacao.status !== "confirmada") return false;
+      if (linha.repasseStatus !== null && linha.repasseStatus !== "falhou") return false;
       const d = linha.doacao;
       if (d.provedorPagamentoId) {
         const reembolso = await provedores.entrada.reembolsar({ idProvedor: d.provedorPagamentoId, valorCentavos: d.valorCentavos });

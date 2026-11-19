@@ -31,7 +31,11 @@ export interface ProvedorSaida {
     chaveInvalida: boolean;
     erro?: string;
   }>;
-  consultar(idProvedor: string): Promise<{ status: StatusEnvio }>;
+  /**
+   * Conciliação: o que o provedor sabe dessa transferência. "desconhecido" = nunca
+   * chegou lá, é seguro reenviar. Consulta por id quando houver, senão pela referência.
+   */
+  consultar(i: { idProvedor: string | null; refExterna: string }): Promise<{ status: StatusEnvio | "desconhecido" }>;
 }
 
 export interface ProvedorEmail {

@@ -1,4 +1,5 @@
-import { index, integer, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { chavesPix, recebedores } from "./recebedores";
 
 export const statusRepasse = pgEnum("status_repasse", ["agendado", "enviando", "concluido", "falhou"]);
@@ -24,5 +25,9 @@ export const repasses = pgTable(
     criadoEm: timestamp("criado_em", { withTimezone: true }).notNull().defaultNow(),
     concluidoEm: timestamp("concluido_em", { withTimezone: true }),
   },
-  (t) => [index("repasses_status_agendado_idx").on(t.status, t.agendadoPara)],
+  (t) => [
+    index("repasses_status_agendado_idx").on(t.status, t.agendadoPara),
+    // Um único repasse em aberto por recebedor: segunda linha de defesa contra agrupamento concorrente.
+    uniqueIndex("repasses_um_agendado_por_recebedor_unq").on(t.recebedorId).where(sql`${t.status} = 'agendado'`),
+  ],
 );

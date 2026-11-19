@@ -172,3 +172,60 @@ describe("devolverRetidos", () => {
     expect(lista.some((r) => r.status === "concluido")).toBe(true);
   });
 });
+
+describe("segurança do dinheiro", () => {
+  test("recebedor inválido não ganha repasse novo", async () => {
+    expect(await servico.agendarParaRecebedor(ids.invalida!)).toBeNull();
+  });
+
+  test("devolverRetidos não estorna doação presa num repasse agendado ou enviando", async () => {
+    const n = await cadastrar("presa", "33333333-04b1-4d8a-9f27-c21e5a6b0d93");
+    await doar(n, "5");
+    const repasseId = await servico.agendarParaRecebedor(ids.presa!);
+    expect(repasseId).toBeTruthy();
+    await recebedores.marcarInvalida(ids.presa!);
+    relogio = new Date(relogio.getTime() + 31 * 24 * 60 * 60_000);
+    const antes = await saldo(db);
+    expect(await servico.devolverRetidos(30)).toBe(0);
+    expect(await saldo(db)).toBe(antes);
+    // depois que o repasse falha de vez, aí sim devolve
+    await db.update(repasses).set({ status: "falhou", erro: "teste" }).where(eq(repasses.id, repasseId!));
+    expect(await servico.devolverRetidos(30)).toBe(1);
+  });
+
+  test("erro lançado pelo provedor deixa o repasse em 'enviando' e a conciliação decide", async () => {
+    const n = await cadastrar("ambigua", "44444444-04b1-4d8a-9f27-c21e5a6b0d93");
+    await servico.processarAgendados(); // escoa o que testes anteriores deixaram agendado
+    await doar(n, "5");
+    await servico.agendarParaRecebedor(ids.ambigua!);
+    saida.lancarNoProximoEnvio(new Error("timeout"));
+    expect(await servico.processarAgendados()).toEqual({ concluidos: 0, falhos: 0 });
+    let [rep] = await db.select().from(repasses).where(eq(repasses.recebedorId, ids.ambigua!));
+    expect(rep!.status).toBe("enviando");
+    expect(rep!.erro).toMatch(/timeout/);
+    // provedor não conhece a transferência: nunca saiu → volta para agendado (sem contar tentativa como falha definitiva)
+    saida.definirConsulta(rep!.refExterna, "desconhecido");
+    expect(await servico.processarAgendados()).toEqual({ concluidos: 0, falhos: 0 });
+    [rep] = await db.select().from(repasses).where(eq(repasses.recebedorId, ids.ambigua!));
+    expect(rep!.status).toBe("agendado");
+    expect(rep!.tentativas).toBe(1);
+    // na próxima rodada o fake envia normalmente
+    relogio = new Date(relogio.getTime() + 3 * 60_000);
+    expect(await servico.processarAgendados()).toEqual({ concluidos: 1, falhos: 0 });
+  });
+
+  test("erro lançado, mas o provedor diz que concluiu: conclui sem reenviar", async () => {
+    const n = await cadastrar("ambigua2", "55555555-04b1-4d8a-9f27-c21e5a6b0d93");
+    await doar(n, "5");
+    await servico.agendarParaRecebedor(ids.ambigua2!);
+    const enviosAntes = saida.envios.length;
+    saida.lancarNoProximoEnvio(new Error("timeout"));
+    await servico.processarAgendados();
+    const [rep] = await db.select().from(repasses).where(eq(repasses.recebedorId, ids.ambigua2!));
+    saida.definirConsulta(rep!.refExterna, "concluido");
+    const antes = await saldo(db);
+    expect(await servico.processarAgendados()).toEqual({ concluidos: 1, falhos: 0 });
+    expect(await saldo(db)).toBe(antes - 450);
+    expect(saida.envios.length).toBe(enviosAntes); // nenhum reenvio
+  });
+});
