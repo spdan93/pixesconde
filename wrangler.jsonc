@@ -25,11 +25,11 @@
 	},
 	// Em dev, a string de conexão local vem de
 	// CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE (ver .dev.vars.example)
-	// ou do localConnectionString abaixo. O id só importa em produção.
+	// ou do localConnectionString abaixo. O id é o Hyperdrive pix-esconde-db, ligado ao Supabase.
 	"hyperdrive": [
 		{
 			"binding": "HYPERDRIVE",
-			"id": "00000000000000000000000000000000",
+			"id": "cd23bbff01c946c78198f2cf52d0c257",
 			"localConnectionString": "postgres://postgres:postgres@localhost:5433/pix_esconde"
 		}
 	],
