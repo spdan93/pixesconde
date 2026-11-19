@@ -1,4 +1,7 @@
-import satori from "satori";
+import type satori from "satori";
+
+/** O motor é injetado: em Node é o `satori` padrão; no Worker é `satori/wasm` com o Yoga inicializado. */
+export type MotorSatori = typeof satori;
 
 export type DadosImagem = {
   valorTexto: string;
@@ -41,9 +44,9 @@ function Linha({ rotulo, valor, bold, italico, ultima }: { rotulo: string; valor
 }
 
 /** A imagem quadrada do comprovante (1080×1080), pronta para o story. Satori: JSX → SVG. */
-export async function gerarSvgComprovante(d: DadosImagem, fontes: FontesImagem): Promise<string> {
+export async function gerarSvgComprovante(d: DadosImagem, fontes: FontesImagem, motor: MotorSatori): Promise<string> {
   const toBuf = (b: ArrayBuffer | Uint8Array) => (b instanceof Uint8Array ? b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) : b) as ArrayBuffer;
-  return satori(
+  return motor(
     <div
       style={{
         width: 1080,

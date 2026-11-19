@@ -12,9 +12,9 @@ const PREFIXO_COOKIE = "apelido:";
 export type MotivoVinculo =
   | "nao_e_o_doador"
   | "sem_apelido"
-  | "apelido_de_outro"
+  /** apelido de outro dono OU e-mail já dono de outro apelido: uma resposta só, para não virar oráculo de e-mails. */
+  | "em_uso"
   | "email_invalido"
-  | "email_ja_tem_apelido"
   | "doacao_nao_confirmada"
   | "muitas_tentativas";
 
@@ -47,12 +47,10 @@ export function mensagemRecusaVinculo(motivo: MotivoVinculo): string {
       return "Esse Pix foi anônimo. Não tem apelido para vincular.";
     case "doacao_nao_confirmada":
       return "Esse Pix ainda não foi confirmado. Espera um pouco.";
-    case "apelido_de_outro":
-      return "Esse apelido já tem dono, e o e-mail não bate.";
+    case "em_uso":
+      return "Esse apelido já tem dono, ou esse e-mail já é dono de outro apelido. Um e-mail, um apelido.";
     case "email_invalido":
       return "Isso não parece um e-mail.";
-    case "email_ja_tem_apelido":
-      return "Esse e-mail já é dono de outro apelido. Um e-mail, um apelido.";
     case "muitas_tentativas":
       return "Muitos pedidos em pouco tempo. Olha o e-mail que já mandamos, ou tenta daqui a uma hora.";
   }
@@ -70,18 +68,15 @@ export function criarServicoApelidos(deps: DepsApelidos): ServicoApelidos {
   }
 
   /** Conflitos só contra apelidos CONFIRMADOS: pedido pendente não reserva nada. */
-  async function conflito(nome: string, emailHash: string): Promise<MotivoVinculo | null> {
+  async function conflito(nome: string, emailHash: string): Promise<boolean> {
     const [porNome] = await db.select().from(apelidos).where(and(eq(apelidos.nome, nome), isNotNull(apelidos.confirmadoEm))).limit(1);
-    if (porNome && porNome.emailHash !== emailHash) return "apelido_de_outro";
-    if (!porNome) {
-      const [porEmail] = await db
-        .select({ id: apelidos.id })
-        .from(apelidos)
-        .where(and(eq(apelidos.emailHash, emailHash), isNotNull(apelidos.confirmadoEm)))
-        .limit(1);
-      if (porEmail) return "email_ja_tem_apelido";
-    }
-    return null;
+    if (porNome) return porNome.emailHash !== emailHash;
+    const [porEmail] = await db
+      .select({ id: apelidos.id })
+      .from(apelidos)
+      .where(and(eq(apelidos.emailHash, emailHash), isNotNull(apelidos.confirmadoEm)))
+      .limit(1);
+    return Boolean(porEmail);
   }
 
   return {
@@ -97,13 +92,13 @@ export function criarServicoApelidos(deps: DepsApelidos): ServicoApelidos {
 
       const emailHash = await hmacHex(email, segredos.segredoHmac);
       const nome = doacao.apelidoTexto;
-      const motivo = await conflito(nome, emailHash);
-      if (motivo) return { ok: false, motivo };
 
-      // Limites: por doação e por e-mail, para ninguém usar o site como canhão de e-mail.
+      // Limites ANTES de qualquer resposta que dependa do banco: por doação e por e-mail,
+      // para ninguém usar o site como canhão de e-mail nem como oráculo de quem é dono de quê.
       const dentro =
         (await permitir(db, `vinculo:doa:${doacaoId}`, 60, 3, agora())) && (await permitir(db, `vinculo:email:${emailHash}`, 60, 5, agora()));
       if (!dentro) return { ok: false, motivo: "muitas_tentativas" };
+      if (await conflito(nome, emailHash)) return { ok: false, motivo: "em_uso" };
 
       const [donoConfirmado] = await db
         .select({ id: apelidos.id })

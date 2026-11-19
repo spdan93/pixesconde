@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import satori from "satori";
 import { gerarSvgComprovante, type DadosImagem } from "./comprovante";
 
 const raiz = fileURLToPath(new URL("../../../public/fonts/ttf/", import.meta.url));
@@ -26,7 +27,7 @@ const dados: DadosImagem = {
 
 describe("gerarSvgComprovante", () => {
   test("gera um SVG 1080x1080 com os dados do recibo", async () => {
-    const svg = await gerarSvgComprovante(dados, await fontes());
+    const svg = await gerarSvgComprovante(dados, await fontes(), satori);
     expect(svg.startsWith("<svg")).toBe(true);
     expect(svg).toContain('width="1080"');
     expect(svg).toContain('height="1080"');
@@ -35,7 +36,7 @@ describe("gerarSvgComprovante", () => {
   });
 
   test("sem mensagem, usa o traço", async () => {
-    const svg = await gerarSvgComprovante({ ...dados, mensagem: null }, await fontes());
+    const svg = await gerarSvgComprovante({ ...dados, mensagem: null }, await fontes(), satori);
     expect(svg.startsWith("<svg")).toBe(true);
   });
 });

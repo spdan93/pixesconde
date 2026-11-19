@@ -127,7 +127,7 @@ describe("vínculo por link mágico", () => {
 
   test("mesmo apelido com outro e-mail é de outro", async () => {
     const d = await doar("pastel_de_vento");
-    expect(await servico.solicitarVinculo({ doacaoId: d, email: "impostor@exemplo.com", segredoDoador: segredos.get(d)! })).toEqual({ ok: false, motivo: "apelido_de_outro" });
+    expect(await servico.solicitarVinculo({ doacaoId: d, email: "impostor@exemplo.com", segredoDoador: segredos.get(d)! })).toEqual({ ok: false, motivo: "em_uso" });
   });
 
   test("dono em outro aparelho pede novo link; só a doação do link é vinculada", async () => {
@@ -177,6 +177,14 @@ describe("prova de que é o doador", () => {
 });
 
 describe("limite de pedidos de vínculo", () => {
+  test("o limite vem antes da checagem de conflito: não dá para testar e-mails sem gastar cota", async () => {
+    const d = await doar("pastel_de_vento");
+    for (let i = 0; i < 3; i++) {
+      expect(await servico.solicitarVinculo({ doacaoId: d, email: `x${i}@exemplo.com`, segredoDoador: segredos.get(d)! })).toEqual({ ok: false, motivo: "em_uso" });
+    }
+    expect(await servico.solicitarVinculo({ doacaoId: d, email: "x9@exemplo.com", segredoDoador: segredos.get(d)! })).toEqual({ ok: false, motivo: "muitas_tentativas" });
+  });
+
   test("a 4ª solicitação na hora para a mesma doação é recusada", async () => {
     const d = await doar("limitado");
     for (let i = 0; i < 3; i++) {
