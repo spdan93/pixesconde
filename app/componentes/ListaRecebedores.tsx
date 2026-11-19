@@ -56,7 +56,7 @@ export function ListaRecebedores({ itens, agora }: { itens: Item[]; agora: Date 
                 <span className="text-cinza">{r.quantidadePix === 0 ? "ninguém mandou nada ainda" : "sem mensagem"}</span>
               )}
             </td>
-            <td className="py-3 text-right">
+            <td className="whitespace-nowrap py-3 text-right">
               <b>{formatarReais(r.totalRecebidoCentavos)}</b>
               <div className="text-[12px] text-cinza">{r.quantidadePix === 1 ? "1 pix" : `${r.quantidadePix} pix`}</div>
             </td>

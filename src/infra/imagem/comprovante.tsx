@@ -84,8 +84,8 @@ export async function gerarSvgComprovante(d: DadosImagem, fontes: FontesImagem, 
       <div
         style={{
           position: "absolute",
-          right: 96,
-          top: 300,
+          right: 88,
+          top: 196,
           transform: "rotate(-10deg)",
           border: `8px solid ${PIX}`,
           color: PIX,

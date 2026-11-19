@@ -15,7 +15,7 @@ type Props = Base &
   );
 
 const base =
-  "inline-flex items-center justify-center rounded-md font-titulo font-bold leading-none transition-[transform,background-color,border-color] duration-150 ease-out hover:-translate-y-px active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0";
+  "inline-flex items-center justify-center whitespace-nowrap rounded-md font-titulo font-bold leading-none transition-[transform,background-color,border-color] duration-150 ease-out hover:-translate-y-px active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0";
 const variantes = {
   primario: "bg-pix text-white hover:bg-pix-escuro",
   contorno: "border-2 border-tinta bg-papel text-tinta hover:bg-tinta hover:text-papel",

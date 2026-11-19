@@ -12,10 +12,7 @@ export async function loader({ context }: Route.LoaderArgs) {
   return { taxaTexto: formatarBp(cfg.taxaBp) };
 }
 
-export const links: Route.LinksFunction = () => [
-  { rel: "preload", href: "/fonts/ibm-plex-mono-400-normal.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
-  { rel: "preload", href: "/fonts/archivo-narrow-700-normal.woff2", as: "font", type: "font/woff2", crossOrigin: "anonymous" },
-];
+export const links: Route.LinksFunction = () => [{ rel: "icon", href: "/favicon.ico" }];
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
