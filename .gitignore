@@ -27,6 +27,8 @@
 .wrangler
 .dev.vars*
 !.dev.vars.example
+# segredos de produção usados só em comandos locais (senha do banco do Supabase)
+.prod.vars
 worker-configuration.d.ts
 
 # testes
