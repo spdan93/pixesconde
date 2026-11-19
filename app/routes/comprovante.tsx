@@ -183,7 +183,7 @@ export default function Comprovante({ loaderData: d, actionData }: Route.Compone
 function Linha({ rotulo, children, ultima }: { rotulo: string; children: React.ReactNode; ultima?: boolean }) {
   return (
     <div className={`flex justify-between gap-4 py-2 ${ultima ? "" : "linha-pontilhada"}`}>
-      <dt className="text-cinza">{rotulo}</dt>
+      <dt className="whitespace-nowrap text-cinza">{rotulo}</dt>
       <dd className="text-right">{children}</dd>
     </div>
   );

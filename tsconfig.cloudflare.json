@@ -10,6 +10,8 @@
     "scripts/**/*",
     "vitest.config.ts",
     "drizzle.config.ts",
+    "playwright.config.ts",
+    "e2e/**/*",
     "worker-configuration.d.ts"
   ],
   "compilerOptions": {
