@@ -22,6 +22,8 @@ export const repasses = pgTable(
     tentativas: integer("tentativas").notNull().default(0),
     erro: text("erro"),
     agendadoPara: timestamp("agendado_para", { withTimezone: true }).notNull().defaultNow(),
+    /** Quando passou a 'enviando'. A conciliação só mexe em quem está nesse estado há mais que a carência. */
+    reclamadoEm: timestamp("reclamado_em", { withTimezone: true }),
     criadoEm: timestamp("criado_em", { withTimezone: true }).notNull().defaultNow(),
     concluidoEm: timestamp("concluido_em", { withTimezone: true }),
   },

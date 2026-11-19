@@ -28,9 +28,11 @@ let relogio = new Date("2026-11-18T20:00:00Z");
 
 const provedores = criarProvedores({ PROVEDOR_PAGAMENTO: "fake", PROVEDOR_REPASSE: "fake", URL_PUBLICA: "http://x" }, { silencioso: true });
 
+const segredos = new Map<string, string>();
 async function doar(apelido: string, valorTexto = "5", apelidoIdDoCookie: string | null = null) {
   const r = await doacoesSvc.criarIntencao({ numeroPublico: 1, valorTexto, mensagem: "oi", apelido, apelidoIdDoCookie });
   if (!r.ok) throw new Error(`setup doar: ${r.motivo}`);
+  segredos.set(r.doacaoId, r.segredoDoador);
   entrada.marcarResultado(`doa_${r.doacaoId}`, "aprovado");
   await doacoesSvc.processarNotificacao({ provedor: "fake", idExterno: `evt_${r.doacaoId}`, refExterna: `doa_${r.doacaoId}`, idProvedor: null, payload: {} });
   return r.doacaoId;
@@ -64,16 +66,16 @@ describe("vínculo por link mágico", () => {
 
   test("doação sem apelido não tem o que vincular", async () => {
     const semApelido = await doar("");
-    expect(await servico.solicitarVinculo({ doacaoId: semApelido, email: "a@b.com" })).toEqual({ ok: false, motivo: "sem_apelido" });
+    expect(await servico.solicitarVinculo({ doacaoId: semApelido, email: "a@b.com", segredoDoador: segredos.get(semApelido)! })).toEqual({ ok: false, motivo: "sem_apelido" });
   });
 
   test("e-mail inválido é recusado", async () => {
     doacaoId = await doar("pastel_de_vento");
-    expect(await servico.solicitarVinculo({ doacaoId, email: "nao é email" })).toEqual({ ok: false, motivo: "email_invalido" });
+    expect(await servico.solicitarVinculo({ doacaoId, email: "nao é email", segredoDoador: segredos.get(doacaoId)! })).toEqual({ ok: false, motivo: "email_invalido" });
   });
 
   test("solicitar envia e-mail com link e cria apelido não confirmado", async () => {
-    expect(await servico.solicitarVinculo({ doacaoId, email: "Pastel@Exemplo.com " })).toEqual({ ok: true });
+    expect(await servico.solicitarVinculo({ doacaoId, email: "Pastel@Exemplo.com ", segredoDoador: segredos.get(doacaoId)! })).toEqual({ ok: true });
     expect(email.enviados.at(-1)!.para).toBe("pastel@exemplo.com");
     expect(email.enviados.at(-1)!.texto).toContain("http://x/apelido/confirmar/");
     const [a] = await db.select().from(apelidos).where(eq(apelidos.nome, "pastel_de_vento"));
@@ -112,13 +114,13 @@ describe("vínculo por link mágico", () => {
 
   test("mesmo apelido com outro e-mail é de outro", async () => {
     const d = await doar("pastel_de_vento");
-    expect(await servico.solicitarVinculo({ doacaoId: d, email: "impostor@exemplo.com" })).toEqual({ ok: false, motivo: "apelido_de_outro" });
+    expect(await servico.solicitarVinculo({ doacaoId: d, email: "impostor@exemplo.com", segredoDoador: segredos.get(d)! })).toEqual({ ok: false, motivo: "apelido_de_outro" });
   });
 
   test("dono em outro aparelho pede novo link; só a doação do link é vinculada", async () => {
     const semCookie = await doar("pastel_de_vento", "20");
     const anterior = await doar("pastel_de_vento", "20");
-    expect(await servico.solicitarVinculo({ doacaoId: semCookie, email: "pastel@exemplo.com" })).toEqual({ ok: true });
+    expect(await servico.solicitarVinculo({ doacaoId: semCookie, email: "pastel@exemplo.com", segredoDoador: segredos.get(semCookie)! })).toEqual({ ok: true });
     const r = await servico.confirmarToken(tokenDoUltimoEmail());
     expect(r.ok).toBe(true);
     const [d] = await db.select().from(doacoes).where(eq(doacoes.id, semCookie));
@@ -129,7 +131,7 @@ describe("vínculo por link mágico", () => {
 
   test("token expirado não confirma", async () => {
     const d = await doar("pastel_de_vento");
-    await servico.solicitarVinculo({ doacaoId: d, email: "pastel@exemplo.com" });
+    await servico.solicitarVinculo({ doacaoId: d, email: "pastel@exemplo.com", segredoDoador: segredos.get(d)! });
     const token = tokenDoUltimoEmail();
     relogio = new Date(relogio.getTime() + 31 * 60_000);
     expect(await servico.confirmarToken(token)).toEqual({ ok: false });
@@ -143,5 +145,20 @@ describe("denúncia", () => {
     const [doacao] = await db.select().from(doacoes).where(eq(doacoes.id, d));
     expect(doacao!.mensagemOculta).toBe(true);
     expect(await db.select().from(denuncias).where(eq(denuncias.doacaoId, d))).toHaveLength(1);
+  });
+});
+
+describe("prova de que é o doador", () => {
+  test("sem o segredo do doador (ou com segredo errado) não vincula", async () => {
+    const r = await doacoesSvc.criarIntencao({ numeroPublico: 1, valorTexto: "5", mensagem: "", apelido: "dona_certa", apelidoIdDoCookie: null });
+    if (!r.ok) throw new Error("setup");
+    expect(r.segredoDoador).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    entrada.marcarResultado(`doa_${r.doacaoId}`, "aprovado");
+    await doacoesSvc.processarNotificacao({ provedor: "fake", idExterno: `evt_${r.doacaoId}`, refExterna: `doa_${r.doacaoId}`, idProvedor: null, payload: {} });
+    expect(await servico.solicitarVinculo({ doacaoId: r.doacaoId, email: "x@y.com", segredoDoador: "errado" })).toEqual({ ok: false, motivo: "nao_e_o_doador" });
+    expect(await servico.solicitarVinculo({ doacaoId: r.doacaoId, email: "x@y.com", segredoDoador: null })).toEqual({ ok: false, motivo: "nao_e_o_doador" });
+    expect(await servico.solicitarVinculo({ doacaoId: r.doacaoId, email: "x@y.com", segredoDoador: r.segredoDoador })).toEqual({ ok: true });
+    expect(await servico.ehODoador(r.doacaoId, r.segredoDoador)).toBe(true);
+    expect(await servico.ehODoador(r.doacaoId, "errado")).toBe(false);
   });
 });

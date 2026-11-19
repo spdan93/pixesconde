@@ -248,3 +248,18 @@ describe("estorno e repasse", () => {
     expect(await servico.estornar(r.doacaoId, "agora pode")).toBe(true);
   });
 });
+
+describe("estorno com reembolso falho", () => {
+  test("se o provedor não reembolsa, a doação continua confirmada e nada é lançado", async () => {
+    const r = await servico.criarIntencao({ ...base, valorTexto: "5", mensagem: "", apelido: "" });
+    if (!r.ok) throw new Error("setup");
+    entrada.marcarResultado(`doa_${r.doacaoId}`, "aprovado");
+    await servico.processarNotificacao({ provedor: "fake", idExterno: "evt_11", refExterna: `doa_${r.doacaoId}`, idProvedor: null, payload: {} });
+    const antes = await saldo(db);
+    entrada.falharProximoReembolso("indisponível");
+    expect(await servico.estornar(r.doacaoId, "teste")).toBe(false);
+    const [d] = await db.select().from(doacoes).where(eq(doacoes.id, r.doacaoId));
+    expect(d!.status).toBe("confirmada");
+    expect(await saldo(db)).toBe(antes);
+  });
+});

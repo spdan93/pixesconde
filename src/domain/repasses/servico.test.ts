@@ -205,6 +205,7 @@ describe("segurança do dinheiro", () => {
     expect(rep!.erro).toMatch(/timeout/);
     // provedor não conhece a transferência: nunca saiu → volta para agendado (sem contar tentativa como falha definitiva)
     saida.definirConsulta(rep!.refExterna, "desconhecido");
+    relogio = new Date(relogio.getTime() + 6 * 60_000); // carência da conciliação
     expect(await servico.processarAgendados()).toEqual({ concluidos: 0, falhos: 0 });
     [rep] = await db.select().from(repasses).where(eq(repasses.recebedorId, ids.ambigua!));
     expect(rep!.status).toBe("agendado");
@@ -223,9 +224,27 @@ describe("segurança do dinheiro", () => {
     await servico.processarAgendados();
     const [rep] = await db.select().from(repasses).where(eq(repasses.recebedorId, ids.ambigua2!));
     saida.definirConsulta(rep!.refExterna, "concluido");
+    relogio = new Date(relogio.getTime() + 6 * 60_000); // carência da conciliação
     const antes = await saldo(db);
     expect(await servico.processarAgendados()).toEqual({ concluidos: 1, falhos: 0 });
     expect(await saldo(db)).toBe(antes - 450);
-    expect(saida.envios.length).toBe(enviosAntes); // nenhum reenvio
+    expect(saida.envios.slice(enviosAntes).filter((e) => e.refExterna === rep!.refExterna)).toHaveLength(0); // nenhum reenvio deste
+  });
+});
+
+describe("carência da conciliação", () => {
+  test("repasse 'enviando' recém-reclamado por outro processo não é tocado; depois da carência, é", async () => {
+    const n = await cadastrar("carencia", "66666666-04b1-4d8a-9f27-c21e5a6b0d93");
+    await doar(n, "5");
+    const repasseId = await servico.agendarParaRecebedor(ids.carencia!);
+    // simula outro processo que reclamou há 1 minuto e está no meio da chamada ao provedor
+    await db.update(repasses).set({ status: "enviando", reclamadoEm: new Date(relogio.getTime() - 60_000) }).where(eq(repasses.id, repasseId!));
+    await servico.processarAgendados();
+    let [rep] = await db.select().from(repasses).where(eq(repasses.id, repasseId!));
+    expect(rep!.status).toBe("enviando");
+    relogio = new Date(relogio.getTime() + 6 * 60_000);
+    await servico.processarAgendados();
+    [rep] = await db.select().from(repasses).where(eq(repasses.id, repasseId!));
+    expect(rep!.status).toBe("agendado"); // provedor não conhece: nunca saiu
   });
 });

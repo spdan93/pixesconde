@@ -9,6 +9,8 @@ import { lancar } from "@/domain/razao/servico";
 
 export const DESCRICAO_PIX = "PIX ESCONDE";
 export const MAX_TENTATIVAS = 5;
+/** Um repasse 'enviando' só entra na conciliação depois disso: cobre a chamada em curso de outro processo. */
+export const CARENCIA_CONCILIACAO_MIN = 5;
 
 export type Repasse = typeof repasses.$inferSelect;
 
@@ -111,48 +113,58 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
   async function reclamar(repasseId: string): Promise<Repasse | null> {
     const [r] = await db
       .update(repasses)
-      .set({ status: "enviando" })
+      .set({ status: "enviando", reclamadoEm: agora() })
       .where(and(eq(repasses.id, repasseId), eq(repasses.status, "agendado")))
       .returning();
     return r ?? null;
   }
 
-  async function concluir(r: Repasse, provedorId: string) {
-    await db.transaction(async (tx) => {
-      await tx
+  // Toda transição a partir de 'enviando' é condicional ao estado: se outro processo já
+  // mexeu, esta chamada não faz nada e, sobretudo, não lança no razão.
+  async function concluir(r: Repasse, provedorId: string): Promise<boolean> {
+    const ok = await db.transaction(async (tx) => {
+      const atualizados = await tx
         .update(repasses)
         .set({ status: "concluido", provedorId, concluidoEm: agora(), erro: null })
-        .where(eq(repasses.id, r.id));
+        .where(and(eq(repasses.id, r.id), eq(repasses.status, "enviando")))
+        .returning({ id: repasses.id });
+      if (atualizados.length === 0) return false;
       await lancar(tx, { tipo: "saida", valorCentavos: -r.valorCentavos, repasseId: r.id });
+      return true;
     });
+    if (!ok) return false;
     const [rec] = await db.select({ status: recebedores.status }).from(recebedores).where(eq(recebedores.id, r.recebedorId));
     if (rec?.status === "aguardando_validacao") await svcRecebedores.marcarAtiva(r.recebedorId);
+    return true;
   }
 
-  async function falharDeVez(r: Repasse, provedorId: string | null, erro: string) {
-    await db
+  async function falharDeVez(r: Repasse, provedorId: string | null, erro: string): Promise<boolean> {
+    const linhas = await db
       .update(repasses)
       .set({ status: "falhou", provedorId, erro, tentativas: r.tentativas + 1 })
-      .where(eq(repasses.id, r.id));
+      .where(and(eq(repasses.id, r.id), eq(repasses.status, "enviando")))
+      .returning({ id: repasses.id });
+    return linhas.length === 1;
   }
 
-  async function reagendar(r: Repasse, provedorId: string | null, erro: string): Promise<"reagendado" | "falhou"> {
+  async function reagendar(r: Repasse, provedorId: string | null, erro: string): Promise<"reagendado" | "falhou" | "ignorado"> {
     const tentativas = r.tentativas + 1;
     if (tentativas > MAX_TENTATIVAS) {
-      await falharDeVez(r, provedorId, `desistiu após ${MAX_TENTATIVAS} tentativas: ${erro}`);
-      return "falhou";
+      return (await falharDeVez(r, provedorId, `desistiu após ${MAX_TENTATIVAS} tentativas: ${erro}`)) ? "falhou" : "ignorado";
     }
-    await db
+    const linhas = await db
       .update(repasses)
       .set({
         status: "agendado",
         tentativas,
         erro,
         provedorId,
+        reclamadoEm: null,
         agendadoPara: new Date(agora().getTime() + 2 ** tentativas * 60_000),
       })
-      .where(eq(repasses.id, r.id));
-    return "reagendado";
+      .where(and(eq(repasses.id, r.id), eq(repasses.status, "enviando")))
+      .returning({ id: repasses.id });
+    return linhas.length === 1 ? "reagendado" : "ignorado";
   }
 
   return {
@@ -218,26 +230,29 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
           continue;
         }
         if (envio.status === "concluido") {
-          await concluir(r, envio.idProvedor);
-          concluidos++;
+          if (await concluir(r, envio.idProvedor)) concluidos++;
         } else if (envio.status === "processando") {
           await db.update(repasses).set({ provedorId: envio.idProvedor }).where(eq(repasses.id, r.id));
         } else if (envio.chaveInvalida) {
-          await falharDeVez(r, envio.idProvedor, envio.erro ?? "chave inválida");
-          await svcRecebedores.marcarInvalida(r.recebedorId);
-          falhos++;
+          if (await falharDeVez(r, envio.idProvedor, envio.erro ?? "chave inválida")) {
+            await svcRecebedores.marcarInvalida(r.recebedorId);
+            falhos++;
+          }
         } else if ((await reagendar(r, envio.idProvedor, envio.erro ?? "falha no envio")) === "falhou") {
           falhos++;
         }
       }
 
-      // Conciliação: o que ficou 'enviando' em rodadas anteriores (processando ou erro ambíguo).
+      // Conciliação: o que está 'enviando' há mais que a carência (processando, erro ambíguo,
+      // ou processo que morreu no meio). Dentro da carência pode ser outro processo em plena chamada.
+      const limiteCarencia = new Date(agora().getTime() - CARENCIA_CONCILIACAO_MIN * 60_000);
       const emAndamento = await db
         .select()
         .from(repasses)
         .where(
           and(
             eq(repasses.status, "enviando"),
+            or(isNull(repasses.reclamadoEm), lte(repasses.reclamadoEm, limiteCarencia)),
             tratadosNestaRodada.length ? notInArray(repasses.id, tratadosNestaRodada) : undefined,
           ),
         )
@@ -245,8 +260,7 @@ export function criarServicoRepasses(deps: DepsRepasses): ServicoRepasses {
       for (const r of emAndamento) {
         const { status } = await provedores.saida.consultar({ idProvedor: r.provedorId, refExterna: r.refExterna });
         if (status === "concluido") {
-          await concluir(r, r.provedorId ?? `conciliado_${r.refExterna}`);
-          concluidos++;
+          if (await concluir(r, r.provedorId ?? `conciliado_${r.refExterna}`)) concluidos++;
         } else if (status === "falhou" || status === "desconhecido") {
           const motivo = status === "falhou" ? "provedor reportou falha" : "provedor não registrou o envio";
           if ((await reagendar(r, r.provedorId, motivo)) === "falhou") falhos++;

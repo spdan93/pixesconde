@@ -34,7 +34,18 @@ export class FakeEntrada implements ProvedorEntrada {
     return { status: c.status, valorCentavos: c.valorCentavos, idProvedor: c.idProvedor };
   }
 
+  private erroReembolso: string | null = null;
+
+  falharProximoReembolso(erro: string) {
+    this.erroReembolso = erro;
+  }
+
   async reembolsar(i: { idProvedor: string; valorCentavos: number }) {
+    if (this.erroReembolso) {
+      const erro = this.erroReembolso;
+      this.erroReembolso = null;
+      return { ok: false, erro };
+    }
     this.reembolsos.push(i);
     return { ok: true };
   }

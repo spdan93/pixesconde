@@ -10,12 +10,17 @@ const PREFIXO_COOKIE = "apelido:";
 
 export type ResultadoVinculo =
   | { ok: true }
-  | { ok: false; motivo: "sem_apelido" | "apelido_de_outro" | "email_invalido" | "email_ja_tem_apelido" | "doacao_nao_confirmada" };
+  | {
+      ok: false;
+      motivo: "nao_e_o_doador" | "sem_apelido" | "apelido_de_outro" | "email_invalido" | "email_ja_tem_apelido" | "doacao_nao_confirmada";
+    };
 
 export type ResultadoConfirmacao = { ok: true; apelidoId: string; nome: string; cookie: string } | { ok: false };
 
 export interface ServicoApelidos {
-  solicitarVinculo(i: { doacaoId: string; email: string }): Promise<ResultadoVinculo>;
+  /** O segredo do doador é entregue só ao navegador que criou a doação (cookie). Sem ele, ninguém vincula. */
+  solicitarVinculo(i: { doacaoId: string; email: string; segredoDoador: string | null }): Promise<ResultadoVinculo>;
+  ehODoador(doacaoId: string, segredoDoador: string | null): Promise<boolean>;
   confirmarToken(token: string): Promise<ResultadoConfirmacao>;
   apelidoIdDoCookie(valorCookie: string | null): Promise<string | null>;
   denunciar(doacaoId: string, motivo: string | null): Promise<void>;
@@ -31,6 +36,8 @@ export type DepsApelidos = {
 
 export function mensagemRecusaVinculo(motivo: Exclude<ResultadoVinculo, { ok: true }>["motivo"]): string {
   switch (motivo) {
+    case "nao_e_o_doador":
+      return "Só quem mandou esse Pix, no mesmo navegador, pode vincular o apelido.";
     case "sem_apelido":
       return "Esse Pix foi anônimo. Não tem apelido para vincular.";
     case "doacao_nao_confirmada":
@@ -48,8 +55,18 @@ export function criarServicoApelidos(deps: DepsApelidos): ServicoApelidos {
   const { db, provedores, segredos, urlPublica } = deps;
   const agora = deps.agora ?? (() => new Date());
 
+  async function ehODoador(doacaoId: string, segredoDoador: string | null): Promise<boolean> {
+    if (!segredoDoador) return false;
+    const [d] = await db.select({ hash: doacoes.segredoDoadorHash }).from(doacoes).where(eq(doacoes.id, doacaoId)).limit(1);
+    if (!d?.hash) return false;
+    return (await sha256Hex(segredoDoador)) === d.hash;
+  }
+
   return {
-    async solicitarVinculo({ doacaoId, email: emailBruto }) {
+    ehODoador,
+
+    async solicitarVinculo({ doacaoId, email: emailBruto, segredoDoador }) {
+      if (!(await ehODoador(doacaoId, segredoDoador))) return { ok: false, motivo: "nao_e_o_doador" };
       const [doacao] = await db.select().from(doacoes).where(eq(doacoes.id, doacaoId)).limit(1);
       if (!doacao || !doacao.apelidoTexto) return { ok: false, motivo: "sem_apelido" };
       if (doacao.status !== "confirmada") return { ok: false, motivo: "doacao_nao_confirmada" };

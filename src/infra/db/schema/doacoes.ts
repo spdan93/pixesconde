@@ -3,7 +3,7 @@ import { recebedores } from "./recebedores";
 import { apelidos } from "./apelidos";
 import { repasses } from "./repasses";
 
-export const statusDoacao = pgEnum("status_doacao", ["pendente", "confirmada", "expirada", "estornada"]);
+export const statusDoacao = pgEnum("status_doacao", ["pendente", "confirmada", "expirada", "estornada", "estornando"]);
 
 /** Uma intenção de Pix sem motivo, que vira doação quando o webhook confirma. */
 export const doacoes = pgTable(
@@ -25,6 +25,8 @@ export const doacoes = pgTable(
     status: statusDoacao("status").notNull().default("pendente"),
     refExterna: text("ref_externa").notNull().unique(),
     provedorPagamentoId: text("provedor_pagamento_id"),
+    /** Hash do segredo entregue só ao navegador do doador: prova de autoria para vincular apelido. */
+    segredoDoadorHash: text("segredo_doador_hash"),
     repasseId: uuid("repasse_id").references(() => repasses.id),
     criadaEm: timestamp("criada_em", { withTimezone: true }).notNull().defaultNow(),
     expiraEm: timestamp("expira_em", { withTimezone: true }).notNull(),

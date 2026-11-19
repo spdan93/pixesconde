@@ -1,4 +1,4 @@
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 import type { Db } from "@/infra/db/client";
 import type { Config } from "@/infra/db/config";
 import { apelidos, doacoes, eventosWebhook, repasses, recebedores as recebedoresNumero } from "@/infra/db/schema";
@@ -8,13 +8,14 @@ import { calcularTaxa, formatarReais, interpretarReais } from "@/domain/dinheiro
 import { mensagemRecusaMensagem, validarMensagem } from "@/domain/texto/validar-mensagem";
 import { mensagemRecusaApelido, validarApelido } from "@/domain/texto/validar-apelido";
 import { lancar } from "@/domain/razao/servico";
+import { gerarToken, sha256Hex } from "@/infra/crypto";
 
 export const DESCRITOR_FATURA = "PIXESCONDE";
 
 export type StatusDoacao = (typeof doacoes.$inferSelect)["status"];
 
 export type ResultadoIntencao =
-  | { ok: true; doacaoId: string; urlPagamento: string }
+  | { ok: true; doacaoId: string; urlPagamento: string; segredoDoador: string }
   | { ok: false; campo: "valor" | "mensagem" | "apelido" | "recebedor"; motivo: string };
 
 export type ResultadoNotificacao = {
@@ -129,9 +130,11 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
       const refExterna = `doa_${id}`;
       const expiraEm = new Date(agora().getTime() + cfg.expiracaoIntencaoMin * 60_000);
       const apelidoId = await apelidoIdParaVincular(apelido.apelido, i.apelidoIdDoCookie);
+      const segredoDoador = gerarToken();
 
       await db.insert(doacoes).values({
         id,
+        segredoDoadorHash: await sha256Hex(segredoDoador),
         recebedorId: recebedor.id,
         valorCentavos,
         taxaBp: cfg.taxaBp,
@@ -156,7 +159,7 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
       if (cobranca.idProvedor) {
         await db.update(doacoes).set({ provedorPagamentoId: cobranca.idProvedor }).where(eq(doacoes.id, id));
       }
-      return { ok: true, doacaoId: id, urlPagamento: cobranca.urlPagamento };
+      return { ok: true, doacaoId: id, urlPagamento: cobranca.urlPagamento, segredoDoador };
     },
 
     async processarNotificacao(i) {
@@ -281,18 +284,38 @@ export function criarServicoDoacoes(deps: DepsDoacoes): ServicoDoacoes {
       if (!linha || linha.doacao.status !== "confirmada") return false;
       if (linha.repasseStatus !== null && linha.repasseStatus !== "falhou") return false;
       const d = linha.doacao;
+
+      // 1) Reserva: 'estornando' tira a doação do alcance do agrupamento de repasses.
+      //    Condicional ao estado lido, para fechar a janela entre a leitura e a reserva.
+      const reservadas = await db
+        .update(doacoes)
+        .set({ status: "estornando" })
+        .where(
+          and(
+            eq(doacoes.id, doacaoId),
+            eq(doacoes.status, "confirmada"),
+            d.repasseId ? eq(doacoes.repasseId, d.repasseId) : isNull(doacoes.repasseId),
+          ),
+        )
+        .returning({ id: doacoes.id });
+      if (reservadas.length === 0) return false;
+
+      // 2) Reembolso no provedor. Falhou: devolve ao estado anterior e não lança nada.
       if (d.provedorPagamentoId) {
         const reembolso = await provedores.entrada.reembolsar({ idProvedor: d.provedorPagamentoId, valorCentavos: d.valorCentavos });
         if (!reembolso.ok) {
           console.error(`[doacoes] reembolso falhou em ${doacaoId}: ${reembolso.erro ?? "sem detalhe"}`);
+          await db.update(doacoes).set({ status: "confirmada" }).where(and(eq(doacoes.id, doacaoId), eq(doacoes.status, "estornando")));
           return false;
         }
       }
+
+      // 3) Fecha: estornada + reversões no razão.
       const estornou = await db.transaction(async (tx) => {
         const atualizadas = await tx
           .update(doacoes)
           .set({ status: "estornada", estornadaEm: agora(), repasseId: null })
-          .where(and(eq(doacoes.id, doacaoId), eq(doacoes.status, "confirmada")))
+          .where(and(eq(doacoes.id, doacaoId), eq(doacoes.status, "estornando")))
           .returning({ id: doacoes.id });
         if (atualizadas.length === 0) return false;
         await lancar(tx, { tipo: "reversao_entrada", valorCentavos: -d.valorCentavos, doacaoId });
